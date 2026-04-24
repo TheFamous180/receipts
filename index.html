@@ -602,8 +602,13 @@
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
           <div class="field-group">
-            <label class="field-label">Last 5 CC <span class="auto-tag">AUTO</span></label>
-            <input type="text" id="fCC" placeholder="e.g. 31087" maxlength="5" />
+            <label class="field-label">Card Used <span class="manual-tag">MANUAL</span></label>
+            <select id="fCard" onchange="handleCardChange()">
+              <option value="">-- Select Card --</option>
+              <option value="31087" selected>31087</option>
+              <option value="__custom__">+ Add New Card...</option>
+            </select>
+            <input type="text" id="fCardCustom" placeholder="Enter last 5 digits" maxlength="5" style="display:none; margin-top:6px;" />
           </div>
           <div class="field-group">
             <label class="field-label">Amount <span class="auto-tag">AUTO</span></label>
@@ -621,10 +626,7 @@
           <select id="fAccount" onchange="handleAccountChange()">
             <option value="">-- Select Account --</option>
             <option value="Xerox">Xerox</option>
-            <option value="Microsoft">Microsoft</option>
-            <option value="IBM">IBM</option>
-            <option value="Deloitte">Deloitte</option>
-            <option value="General">General</option>
+            <option value="Fisher">Fisher</option>
             <option value="__custom__">+ Custom Account...</option>
           </select>
           <input type="text" id="fAccountCustom" placeholder="Type account name" style="display:none; margin-top:6px;" />
@@ -632,13 +634,8 @@
 
         <div class="field-group">
           <label class="field-label">Sub-Account <span class="manual-tag">MANUAL</span></label>
-          <select id="fSubAccount" onchange="handleSubAccountChange()">
-            <option value="">-- Select Sub-Account --</option>
-            <option value="XeroxBL">XeroxBL</option>
-            <option value="XeroxOPS">XeroxOPS</option>
-            <option value="XeroxIT">XeroxIT</option>
-            <option value="General">General</option>
-            <option value="__custom__">+ Custom Sub-Account...</option>
+          <select id="fSubAccount" onchange="handleSubAccountChange()" disabled>
+            <option value="">-- Select Account first --</option>
           </select>
           <input type="text" id="fSubAccountCustom" placeholder="Type sub-account name" style="display:none; margin-top:6px;" />
         </div>
@@ -804,7 +801,6 @@
       document.getElementById('formBody').style.display = 'block';
 
       document.getElementById('fVendor').value = parsed.vendor || '';
-      document.getElementById('fCC').value = parsed.last5cc || '';
       document.getElementById('fAmount').value = parsed.amount || '';
       document.getElementById('fDate').value = parsed.date || '';
 
@@ -812,7 +808,7 @@
       setLeftStatus('success', 'Extraction complete — review below');
       setRightStatus('active', 'Edit fields, then generate PDF');
 
-      ['fVendor','fCC','fAmount','fDate'].forEach(id => {
+      ['fVendor','fAmount','fDate'].forEach(id => {
         document.getElementById(id).addEventListener('input', updateFilenamePreview);
       });
 
@@ -829,35 +825,227 @@
     errEl.style.display = 'block';
     errEl.innerHTML = msg;
     setLeftStatus('error', 'Extraction failed — fill in manually');
-    ['fVendor','fCC','fAmount','fDate'].forEach(id => {
+    ['fVendor','fAmount','fDate'].forEach(id => {
       document.getElementById(id).addEventListener('input', updateFilenamePreview);
     });
   }
 
-  // ─── Account dropdowns ───
+  // ─── Accounts / Sub-Accounts / Cards (with localStorage persistence) ───
+  const STORAGE_KEYS = {
+    accounts: 'receipt_accounts',
+    subAccounts: 'receipt_subAccounts',
+    cards: 'receipt_cards'
+  };
+
+  // Default data — used on first load
+  const DEFAULT_DATA = {
+    accounts: ['Xerox', 'Fisher'],
+    subAccounts: {
+      Xerox: ['Xerox_BL', 'Xerox_NSP', 'Xerox_Refresh'],
+      Fisher: ['Fisher_OneDevice']
+    },
+    cards: ['31087']
+  };
+
+  function loadStoredData() {
+    try {
+      const accounts = JSON.parse(localStorage.getItem(STORAGE_KEYS.accounts)) || DEFAULT_DATA.accounts;
+      const subAccounts = JSON.parse(localStorage.getItem(STORAGE_KEYS.subAccounts)) || DEFAULT_DATA.subAccounts;
+      const cards = JSON.parse(localStorage.getItem(STORAGE_KEYS.cards)) || DEFAULT_DATA.cards;
+      return { accounts, subAccounts, cards };
+    } catch (e) {
+      return DEFAULT_DATA;
+    }
+  }
+
+  function saveStoredData(data) {
+    try {
+      localStorage.setItem(STORAGE_KEYS.accounts, JSON.stringify(data.accounts));
+      localStorage.setItem(STORAGE_KEYS.subAccounts, JSON.stringify(data.subAccounts));
+      localStorage.setItem(STORAGE_KEYS.cards, JSON.stringify(data.cards));
+    } catch (e) { console.warn('Could not save to localStorage:', e); }
+  }
+
+  let stored = loadStoredData();
+
+  function populateAccountDropdown() {
+    const sel = document.getElementById('fAccount');
+    const current = sel.value;
+    sel.innerHTML = '<option value="">-- Select Account --</option>';
+    stored.accounts.forEach(a => {
+      const opt = document.createElement('option');
+      opt.value = a; opt.textContent = a;
+      sel.appendChild(opt);
+    });
+    const customOpt = document.createElement('option');
+    customOpt.value = '__custom__'; customOpt.textContent = '+ Custom Account...';
+    sel.appendChild(customOpt);
+    if (current) sel.value = current;
+  }
+
+  function populateSubAccountDropdown(accountName) {
+    const sel = document.getElementById('fSubAccount');
+    sel.innerHTML = '';
+    if (!accountName || accountName === '__custom__') {
+      sel.innerHTML = '<option value="">-- Select Account first --</option>';
+      sel.disabled = true;
+      return;
+    }
+    sel.disabled = false;
+    sel.innerHTML = '<option value="">-- Select Sub-Account --</option>';
+    const subs = stored.subAccounts[accountName] || [];
+    subs.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s; opt.textContent = s;
+      sel.appendChild(opt);
+    });
+    const customOpt = document.createElement('option');
+    customOpt.value = '__custom__'; customOpt.textContent = '+ Custom Sub-Account...';
+    sel.appendChild(customOpt);
+  }
+
+  function populateCardDropdown() {
+    const sel = document.getElementById('fCard');
+    const current = sel.value || stored.cards[0] || '';
+    sel.innerHTML = '<option value="">-- Select Card --</option>';
+    stored.cards.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c; opt.textContent = c;
+      sel.appendChild(opt);
+    });
+    const customOpt = document.createElement('option');
+    customOpt.value = '__custom__'; customOpt.textContent = '+ Add New Card...';
+    sel.appendChild(customOpt);
+    sel.value = current || stored.cards[0] || '';
+  }
+
+  // Initial population on page load
+  populateAccountDropdown();
+  populateCardDropdown();
+
   function handleAccountChange() {
     const sel = document.getElementById('fAccount').value;
     const custom = document.getElementById('fAccountCustom');
-    custom.style.display = sel === '__custom__' ? 'block' : 'none';
-    if (sel === '__custom__') custom.addEventListener('input', updateFilenamePreview);
+
+    if (sel === '__custom__') {
+      custom.style.display = 'block';
+      custom.addEventListener('blur', saveCustomAccount);
+      populateSubAccountDropdown(null);
+    } else {
+      custom.style.display = 'none';
+      custom.value = '';
+      populateSubAccountDropdown(sel);
+    }
+    // Reset sub-account selection
+    document.getElementById('fSubAccountCustom').style.display = 'none';
+    document.getElementById('fSubAccountCustom').value = '';
+    updateFilenamePreview();
+  }
+
+  function saveCustomAccount() {
+    const customInput = document.getElementById('fAccountCustom');
+    const name = customInput.value.trim();
+    if (!name) return;
+    if (!stored.accounts.includes(name)) {
+      stored.accounts.push(name);
+      stored.subAccounts[name] = [];
+      saveStoredData(stored);
+      populateAccountDropdown();
+      document.getElementById('fAccount').value = name;
+      customInput.style.display = 'none';
+      customInput.value = '';
+      populateSubAccountDropdown(name);
+      showToast('success', '✓ Account "' + name + '" saved for future use');
+    }
     updateFilenamePreview();
   }
 
   function handleSubAccountChange() {
     const sel = document.getElementById('fSubAccount').value;
     const custom = document.getElementById('fSubAccountCustom');
-    custom.style.display = sel === '__custom__' ? 'block' : 'none';
-    if (sel === '__custom__') custom.addEventListener('input', updateFilenamePreview);
+    if (sel === '__custom__') {
+      custom.style.display = 'block';
+      custom.addEventListener('blur', saveCustomSubAccount);
+    } else {
+      custom.style.display = 'none';
+      custom.value = '';
+    }
+    updateFilenamePreview();
+  }
+
+  function saveCustomSubAccount() {
+    const customInput = document.getElementById('fSubAccountCustom');
+    const name = customInput.value.trim();
+    if (!name) return;
+    const account = document.getElementById('fAccount').value;
+    if (!account || account === '__custom__') return;
+    if (!stored.subAccounts[account]) stored.subAccounts[account] = [];
+    if (!stored.subAccounts[account].includes(name)) {
+      stored.subAccounts[account].push(name);
+      saveStoredData(stored);
+      populateSubAccountDropdown(account);
+      document.getElementById('fSubAccount').value = name;
+      customInput.style.display = 'none';
+      customInput.value = '';
+      showToast('success', '✓ Sub-account "' + name + '" saved');
+    }
+    updateFilenamePreview();
+  }
+
+  function handleCardChange() {
+    const sel = document.getElementById('fCard').value;
+    const custom = document.getElementById('fCardCustom');
+    if (sel === '__custom__') {
+      custom.style.display = 'block';
+      custom.addEventListener('blur', saveCustomCard);
+    } else {
+      custom.style.display = 'none';
+      custom.value = '';
+    }
+    updateFilenamePreview();
+  }
+
+  function saveCustomCard() {
+    const customInput = document.getElementById('fCardCustom');
+    const value = customInput.value.trim();
+    if (!value || !/^\d{4,5}$/.test(value)) return;
+    if (!stored.cards.includes(value)) {
+      stored.cards.push(value);
+      saveStoredData(stored);
+      populateCardDropdown();
+      document.getElementById('fCard').value = value;
+      customInput.style.display = 'none';
+      customInput.value = '';
+      showToast('success', '✓ Card "' + value + '" saved for future use');
+    }
     updateFilenamePreview();
   }
 
   document.getElementById('fAccount').addEventListener('change', updateFilenamePreview);
   document.getElementById('fSubAccount').addEventListener('change', updateFilenamePreview);
+  document.getElementById('fCard').addEventListener('change', updateFilenamePreview);
+  document.getElementById('fAccountCustom').addEventListener('input', updateFilenamePreview);
+  document.getElementById('fSubAccountCustom').addEventListener('input', updateFilenamePreview);
+  document.getElementById('fCardCustom').addEventListener('input', updateFilenamePreview);
 
   // ─── Filename Preview ───
+  function cleanVendor(raw) {
+    if (!raw) return '';
+    // Title-case each word, then remove spaces
+    return raw
+      .trim()
+      .split(/\s+/)
+      .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join('');
+  }
+
   function getFieldValues() {
-    const vendor = document.getElementById('fVendor').value.trim();
-    const cc = document.getElementById('fCC').value.trim();
+    const vendorRaw = document.getElementById('fVendor').value;
+    const vendor = cleanVendor(vendorRaw);
+
+    let card = document.getElementById('fCard').value;
+    if (card === '__custom__') card = document.getElementById('fCardCustom').value.trim();
+
     const amount = document.getElementById('fAmount').value.trim();
     const date = document.getElementById('fDate').value.trim();
 
@@ -867,17 +1055,17 @@
     let subAccount = document.getElementById('fSubAccount').value;
     if (subAccount === '__custom__') subAccount = document.getElementById('fSubAccountCustom').value.trim();
 
-    return { vendor, cc, amount, date, account, subAccount };
+    return { vendor, card, amount, date, account, subAccount };
   }
 
   function buildFilename(v) {
     const parts = [];
     if (v.vendor) parts.push(v.vendor);
-    if (v.cc) parts.push(v.cc);
+    if (v.card) parts.push(v.card);
     if (v.amount) parts.push(v.amount);
     if (v.date) parts.push(v.date);
-    if (v.account && v.subAccount) parts.push(`${v.account}-${v.subAccount}`);
-    else if (v.account) parts.push(v.account);
+    // Subaccount only in filename — not account
+    if (v.subAccount) parts.push(v.subAccount);
     return parts.join('_');
   }
 
@@ -892,7 +1080,7 @@
       el.textContent = '— fill in all fields above —';
       el.className = 'value empty';
     }
-    const allFilled = v.vendor && v.cc && v.amount && v.date && v.account && v.subAccount;
+    const allFilled = v.vendor && v.card && v.amount && v.date && v.account && v.subAccount;
     document.getElementById('generateBtn').disabled = !allFilled || !uploadedFile;
   }
 
@@ -917,7 +1105,7 @@
     // Meta fields
     const fields = [
       ['Vendor', v.vendor],
-      ['Credit Card (Last 5)', v.cc],
+      ['Card Used (Last 5)', v.card],
       ['Amount', v.amount],
       ['Transaction Date', formatDateDisplay(v.date)],
       ['Account', v.account],
@@ -1053,11 +1241,16 @@
     fileInput.value = '';
     cameraInput.value = '';
 
-    ['fVendor','fCC','fAmount','fDate'].forEach(id => document.getElementById(id).value = '');
+    ['fVendor','fAmount','fDate'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('fCard').value = stored.cards[0] || '';
+    document.getElementById('fCardCustom').style.display = 'none';
+    document.getElementById('fCardCustom').value = '';
     document.getElementById('fAccount').value = '';
-    document.getElementById('fSubAccount').value = '';
     document.getElementById('fAccountCustom').style.display = 'none';
+    document.getElementById('fAccountCustom').value = '';
     document.getElementById('fSubAccountCustom').style.display = 'none';
+    document.getElementById('fSubAccountCustom').value = '';
+    populateSubAccountDropdown(null);
     document.getElementById('generateBtn').disabled = true;
 
     setLeftStatus('', 'Awaiting upload');
