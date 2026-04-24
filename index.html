@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Receipt Processor</title>
+<title>ExpensePilot</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap');
@@ -339,6 +339,137 @@
     text-align: center;
   }
 
+  /* Setup Modal */
+  .setup-modal {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85);
+    backdrop-filter: blur(8px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    overflow-y: auto;
+  }
+
+  .setup-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 480px;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+
+  .setup-header {
+    padding: 24px 24px 20px;
+    border-bottom: 1px solid var(--border);
+    text-align: center;
+  }
+
+  .setup-body { padding: 24px; }
+
+  .setup-step-label {
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+
+  .setup-step h3 {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .setup-step p {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 16px;
+    line-height: 1.6;
+  }
+
+  .setup-step input[type="text"] {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 14px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    outline: none;
+  }
+
+  .setup-step input[type="text"]:focus { border-color: var(--accent); }
+
+  .setup-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    font-size: 12px;
+    margin: 4px 4px 0 0;
+  }
+
+  .setup-tag-remove {
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .setup-tag-remove:hover { color: var(--error); }
+
+  .setup-subaccount-section {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+
+  .setup-subaccount-section h4 {
+    font-family: 'Syne', sans-serif;
+    font-size: 13px;
+    margin-bottom: 10px;
+  }
+
+  .setup-subaccount-section .row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .setup-subaccount-section input {
+    flex: 1;
+    font-size: 12px;
+    padding: 8px 10px;
+  }
+
+  .setup-subaccount-section button {
+    flex: 0;
+    padding: 8px 14px;
+    font-size: 12px;
+  }
+
+  .reset-link {
+    display: block;
+    text-align: center;
+    padding: 12px;
+    font-size: 10px;
+    color: var(--muted);
+    cursor: pointer;
+    border-top: 1px solid var(--border);
+    margin-top: 20px;
+  }
+  .reset-link:hover { color: var(--error); }
+
   .trip-banner {
     background: var(--surface);
     border-bottom: 1px solid var(--border);
@@ -584,9 +715,57 @@
 </head>
 <body>
 
+<!-- First-Run Setup Modal -->
+<div id="setupModal" class="setup-modal" style="display:none;">
+  <div class="setup-card">
+    <div class="setup-header">
+      <div style="font-family:'Syne',sans-serif; font-size:22px; font-weight:800; letter-spacing:-0.5px;">
+        EXPENSE<span style="color:var(--accent);">.</span>PILOT
+      </div>
+      <div style="font-size:12px; color:var(--muted); margin-top:6px;">Welcome — let's get you set up</div>
+    </div>
+
+    <div class="setup-body">
+      <!-- Step 1: Card -->
+      <div id="setupStep1" class="setup-step">
+        <div class="setup-step-label">Step 1 of 3</div>
+        <h3>Your card number</h3>
+        <p>Enter the last 5 digits of the credit card you'll use most often. You can add more cards later.</p>
+        <input type="text" id="setupCard" maxlength="5" inputmode="numeric" placeholder="e.g. 31087" onkeydown="if(event.key==='Enter'){event.preventDefault();setupNextStep(1);}" />
+        <button class="btn btn-primary" style="width:100%; padding:14px; margin-top:16px;" onclick="setupNextStep(1)">Next →</button>
+      </div>
+
+      <!-- Step 2: Accounts -->
+      <div id="setupStep2" class="setup-step" style="display:none;">
+        <div class="setup-step-label">Step 2 of 3</div>
+        <h3>Your accounts</h3>
+        <p>Add the accounts/clients you'll be filing receipts under. Press Add for each one.</p>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="setupAccountInput" placeholder="e.g. Xerox" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();addSetupAccount();}" />
+          <button class="btn btn-primary" style="flex:0; padding:10px 16px;" onclick="addSetupAccount()">Add</button>
+        </div>
+        <div id="setupAccountList" style="margin-top:14px; min-height:40px;"></div>
+        <button class="btn btn-primary" id="setupStep2Next" style="width:100%; padding:14px; margin-top:16px;" onclick="setupNextStep(2)" disabled>Next →</button>
+      </div>
+
+      <!-- Step 3: Sub-accounts -->
+      <div id="setupStep3" class="setup-step" style="display:none;">
+        <div class="setup-step-label">Step 3 of 3</div>
+        <h3>Sub-accounts</h3>
+        <p>For each account, add the sub-accounts you'll file receipts under. You can also skip this and add them later.</p>
+        <div id="setupSubAccountSections" style="margin-top:14px;"></div>
+        <button class="btn btn-primary" style="width:100%; padding:14px; margin-top:20px;" onclick="finishSetup()">Done — Start Using ExpensePilot</button>
+        <div style="text-align:center; margin-top:8px;">
+          <a href="#" onclick="event.preventDefault(); finishSetup();" style="font-size:11px; color:var(--muted);">Skip and add later</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <header>
-  <div class="logo">RECEIPT<span>.</span>PROC</div>
-  <div class="badge">AI-Powered Receipt Converter</div>
+  <div class="logo">EXPENSE<span>.</span>PILOT</div>
+  <div class="badge">AI-Powered Receipt Processing</div>
 </header>
 
 <!-- Trip Mode Banner -->
@@ -763,6 +942,8 @@
   </div>
 </main>
 
+<a class="reset-link" onclick="resetUserData()">Reset all saved data (cards, accounts, sub-accounts)</a>
+
 <div class="toast" id="toast">
   <span id="toastIcon">✓</span>
   <span id="toastMsg">Done</span>
@@ -918,14 +1099,11 @@
     cards: 'receipt_cards'
   };
 
-  // Default data — used on first load
+  // Default data — used on first load (will be replaced by setup screen if empty)
   const DEFAULT_DATA = {
-    accounts: ['Xerox', 'Fisher'],
-    subAccounts: {
-      Xerox: ['Xerox_BL', 'Xerox_NSP', 'Xerox_Refresh'],
-      Fisher: ['Fisher_OneDevice']
-    },
-    cards: ['31087']
+    accounts: [],
+    subAccounts: {},
+    cards: []
   };
 
   function loadStoredData() {
@@ -948,6 +1126,160 @@
   }
 
   let stored = loadStoredData();
+
+  // ─── One-Time Migration: strip "AccountName_" prefix from sub-accounts ──
+  // Runs once for existing users, then marks itself done.
+  const MIGRATION_KEY = 'receipt_migration_v1_subaccounts';
+  function runOneTimeMigration() {
+    if (localStorage.getItem(MIGRATION_KEY) === 'done') return;
+    let changed = false;
+    Object.keys(stored.subAccounts || {}).forEach(account => {
+      const prefix = account + '_';
+      stored.subAccounts[account] = stored.subAccounts[account].map(sub => {
+        if (sub.startsWith(prefix)) {
+          changed = true;
+          return sub.substring(prefix.length);
+        }
+        return sub;
+      });
+    });
+    if (changed) {
+      saveStoredData(stored);
+      console.log('Migration: stripped account prefixes from sub-accounts');
+    }
+    localStorage.setItem(MIGRATION_KEY, 'done');
+  }
+  runOneTimeMigration();
+
+  // ─── First-Run Setup ───
+  const setupState = { card: '', accounts: [], subAccounts: {} };
+
+  function checkFirstRun() {
+    const hasData = stored.cards.length > 0 || stored.accounts.length > 0;
+    if (!hasData) {
+      document.getElementById('setupModal').style.display = 'flex';
+      document.getElementById('setupCard').focus();
+    }
+  }
+
+  function setupNextStep(currentStep) {
+    if (currentStep === 1) {
+      const card = document.getElementById('setupCard').value.trim();
+      if (!/^\d{4,5}$/.test(card)) {
+        showToast('error', 'Card number must be 4 or 5 digits');
+        return;
+      }
+      setupState.card = card;
+      document.getElementById('setupStep1').style.display = 'none';
+      document.getElementById('setupStep2').style.display = 'block';
+      document.getElementById('setupAccountInput').focus();
+    } else if (currentStep === 2) {
+      if (setupState.accounts.length === 0) {
+        showToast('error', 'Add at least one account');
+        return;
+      }
+      // Build sub-account sections
+      const container = document.getElementById('setupSubAccountSections');
+      container.innerHTML = '';
+      setupState.accounts.forEach(acc => {
+        setupState.subAccounts[acc] = setupState.subAccounts[acc] || [];
+        const section = document.createElement('div');
+        section.className = 'setup-subaccount-section';
+        section.innerHTML = `
+          <h4>${acc}</h4>
+          <div class="row">
+            <input type="text" id="setupSubInput_${acc}" placeholder="e.g. BL, NSP, OneDevice" onkeydown="if(event.key==='Enter'){event.preventDefault();addSetupSubAccount('${acc}');}" />
+            <button class="btn btn-primary" onclick="addSetupSubAccount('${acc}')">Add</button>
+          </div>
+          <div id="setupSubList_${acc}"></div>
+        `;
+        container.appendChild(section);
+      });
+      document.getElementById('setupStep2').style.display = 'none';
+      document.getElementById('setupStep3').style.display = 'block';
+    }
+  }
+
+  function addSetupAccount() {
+    const input = document.getElementById('setupAccountInput');
+    const name = input.value.trim();
+    if (!name) return;
+    if (setupState.accounts.includes(name)) {
+      showToast('error', 'Already added');
+      return;
+    }
+    setupState.accounts.push(name);
+    input.value = '';
+    renderSetupAccountList();
+    document.getElementById('setupStep2Next').disabled = false;
+    input.focus();
+  }
+
+  function removeSetupAccount(name) {
+    setupState.accounts = setupState.accounts.filter(a => a !== name);
+    delete setupState.subAccounts[name];
+    renderSetupAccountList();
+    document.getElementById('setupStep2Next').disabled = setupState.accounts.length === 0;
+  }
+
+  function renderSetupAccountList() {
+    const list = document.getElementById('setupAccountList');
+    list.innerHTML = setupState.accounts.map(a =>
+      `<span class="setup-tag">${a} <span class="setup-tag-remove" onclick="removeSetupAccount('${a}')">✕</span></span>`
+    ).join('');
+  }
+
+  function addSetupSubAccount(account) {
+    const input = document.getElementById(`setupSubInput_${account}`);
+    const name = input.value.trim();
+    if (!name) return;
+    if (setupState.subAccounts[account].includes(name)) {
+      showToast('error', 'Already added');
+      return;
+    }
+    setupState.subAccounts[account].push(name);
+    input.value = '';
+    renderSetupSubList(account);
+    input.focus();
+  }
+
+  function removeSetupSubAccount(account, name) {
+    setupState.subAccounts[account] = setupState.subAccounts[account].filter(s => s !== name);
+    renderSetupSubList(account);
+  }
+
+  function renderSetupSubList(account) {
+    const list = document.getElementById(`setupSubList_${account}`);
+    list.innerHTML = setupState.subAccounts[account].map(s =>
+      `<span class="setup-tag">${s} <span class="setup-tag-remove" onclick="removeSetupSubAccount('${account}','${s}')">✕</span></span>`
+    ).join('');
+  }
+
+  function finishSetup() {
+    // Save everything
+    stored.cards = [setupState.card];
+    stored.accounts = [...setupState.accounts];
+    stored.subAccounts = { ...setupState.subAccounts };
+    saveStoredData(stored);
+
+    // Re-populate dropdowns
+    populateAccountDropdown();
+    populateCardDropdown();
+
+    // Hide modal
+    document.getElementById('setupModal').style.display = 'none';
+    showToast('success', '✓ Setup complete — welcome to ExpensePilot');
+  }
+
+  function resetUserData() {
+    if (!confirm('This will erase all your saved cards, accounts, and sub-accounts. Are you sure?')) return;
+    localStorage.removeItem(STORAGE_KEYS.accounts);
+    localStorage.removeItem(STORAGE_KEYS.subAccounts);
+    localStorage.removeItem(STORAGE_KEYS.cards);
+    localStorage.removeItem(MIGRATION_KEY);
+    sessionStorage.removeItem(TRIP_MODE_KEY);
+    location.reload();
+  }
 
   // ─── Trip Mode ───
   // Lets user lock account/sub-account for a trip — auto-fills every new receipt
@@ -973,7 +1305,7 @@
     const btn = document.getElementById('tripModeToggle');
     if (tripMode.active) {
       banner.classList.add('active');
-      label.textContent = `Trip Mode: ${tripMode.account} → ${tripMode.subAccount}`;
+      label.textContent = `Trip Mode: ${tripMode.account}_${tripMode.subAccount}`;
       sub.textContent = 'Account & sub-account will auto-fill for every receipt this session';
       btn.textContent = 'Disable';
     } else {
@@ -1007,7 +1339,7 @@
     tripMode = { active: true, account: currentAccount, subAccount: currentSub };
     saveTripMode();
     renderTripModeBanner();
-    showToast('success', `✈️ Trip Mode active — locked to ${currentAccount} → ${currentSub}`);
+    showToast('success', `✈️ Trip Mode active — locked to ${currentAccount}_${currentSub}`);
   }
 
   function applyTripMode() {
@@ -1027,6 +1359,9 @@
 
   // Render banner on page load
   renderTripModeBanner();
+
+  // Show first-run setup if no data saved yet
+  checkFirstRun();
 
   function populateAccountDropdown() {
     const sel = document.getElementById('fAccount');
@@ -1224,8 +1559,9 @@
     if (v.card) parts.push(v.card);
     if (v.amount) parts.push(v.amount);
     if (v.date) parts.push(v.date);
-    // Subaccount only in filename — not account
-    if (v.subAccount) parts.push(v.subAccount);
+    // Account_Subaccount (e.g. Xerox_BL, Fisher_OneDevice)
+    if (v.account && v.subAccount) parts.push(`${v.account}_${v.subAccount}`);
+    else if (v.account) parts.push(v.account);
     return parts.join('_');
   }
 
