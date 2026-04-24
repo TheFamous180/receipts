@@ -339,6 +339,51 @@
     text-align: center;
   }
 
+  .trip-banner {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 32px;
+    transition: all 0.3s;
+  }
+
+  .trip-banner.active {
+    background: linear-gradient(90deg, rgba(71, 212, 255, 0.15), rgba(71, 212, 255, 0.05));
+    border-bottom-color: rgba(71, 212, 255, 0.4);
+  }
+
+  .trip-banner-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .trip-banner #tripModeToggle {
+    background: var(--accent2);
+    color: #000;
+    border: none;
+    font-weight: 600;
+  }
+
+  .trip-banner.active #tripModeToggle {
+    background: transparent;
+    color: var(--accent2);
+    border: 1px solid var(--accent2);
+  }
+
+  .trip-banner.active #tripModeLabel {
+    color: var(--accent2);
+  }
+
+  @media (max-width: 600px) {
+    .trip-banner { padding: 12px 16px; }
+    .trip-banner-content { flex-direction: column; align-items: stretch; }
+    .trip-banner #tripModeToggle { width: 100%; }
+  }
+
   .btn-primary {
     background: var(--accent);
     color: #000;
@@ -354,6 +399,17 @@
   }
 
   .btn-secondary:hover { border-color: var(--text); }
+
+  .btn-blue {
+    background: rgba(71, 212, 255, 0.12);
+    border: 1px solid rgba(71, 212, 255, 0.5);
+    color: var(--accent2);
+  }
+
+  .btn-blue:hover {
+    background: rgba(71, 212, 255, 0.2);
+    border-color: var(--accent2);
+  }
 
   /* Status bar */
   .status-bar {
@@ -533,6 +589,20 @@
   <div class="badge">AI-Powered Receipt Converter</div>
 </header>
 
+<!-- Trip Mode Banner -->
+<div id="tripModeBanner" class="trip-banner">
+  <div class="trip-banner-content">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <span style="font-size:16px;">✈️</span>
+      <div>
+        <div id="tripModeLabel" style="font-size:12px; font-weight:600;">Trip Mode: Off</div>
+        <div id="tripModeSub" style="font-size:10px; color:var(--muted); margin-top:2px;">Auto-fills account &amp; sub-account for every receipt</div>
+      </div>
+    </div>
+    <button id="tripModeToggle" class="btn" onclick="toggleTripMode()" style="padding:8px 16px; font-size:11px; white-space:nowrap;">Enable Trip Mode</button>
+  </div>
+</div>
+
 <main>
   <div class="two-col">
 
@@ -647,7 +717,7 @@
 
         <div class="actions" style="flex-direction:column; gap:8px;">
           <button class="btn btn-primary" id="generateBtn" onclick="generatePDF()" disabled style="width:100%; padding:14px;">Generate PDF</button>
-          <button class="btn btn-secondary" id="clearBtn" onclick="clearAll()" style="width:100%; padding:10px; font-size:11px; opacity:0.8;">✕ Start Over / Clear Form</button>
+          <button class="btn btn-blue" id="clearBtn" onclick="clearAll()" style="width:100%; padding:10px; font-size:11px;">✕ Start Over / Clear Form</button>
         </div>
       </div>
 
@@ -813,6 +883,8 @@
       document.getElementById('fAmount').value = parsed.amount || '';
       document.getElementById('fDate').value = parsed.date || '';
 
+      applyTripMode(); // auto-fill account/subaccount if Trip Mode is active
+
       updateFilenamePreview();
       setLeftStatus('success', 'Extraction complete — review below');
       setRightStatus('active', 'Edit fields, then generate PDF');
@@ -876,6 +948,85 @@
   }
 
   let stored = loadStoredData();
+
+  // ─── Trip Mode ───
+  // Lets user lock account/sub-account for a trip — auto-fills every new receipt
+  const TRIP_MODE_KEY = 'receipt_tripMode';
+  let tripMode = loadTripMode();
+
+  function loadTripMode() {
+    try {
+      return JSON.parse(sessionStorage.getItem(TRIP_MODE_KEY)) || { active: false, account: '', subAccount: '' };
+    } catch (e) {
+      return { active: false, account: '', subAccount: '' };
+    }
+  }
+
+  function saveTripMode() {
+    try { sessionStorage.setItem(TRIP_MODE_KEY, JSON.stringify(tripMode)); } catch(e) {}
+  }
+
+  function renderTripModeBanner() {
+    const banner = document.getElementById('tripModeBanner');
+    const label = document.getElementById('tripModeLabel');
+    const sub = document.getElementById('tripModeSub');
+    const btn = document.getElementById('tripModeToggle');
+    if (tripMode.active) {
+      banner.classList.add('active');
+      label.textContent = `Trip Mode: ${tripMode.account} → ${tripMode.subAccount}`;
+      sub.textContent = 'Account & sub-account will auto-fill for every receipt this session';
+      btn.textContent = 'Disable';
+    } else {
+      banner.classList.remove('active');
+      label.textContent = 'Trip Mode: Off';
+      sub.textContent = 'Auto-fills account & sub-account for every receipt';
+      btn.textContent = 'Enable Trip Mode';
+    }
+  }
+
+  function toggleTripMode() {
+    if (tripMode.active) {
+      // Turn off
+      tripMode = { active: false, account: '', subAccount: '' };
+      saveTripMode();
+      renderTripModeBanner();
+      showToast('active', '✈️ Trip Mode disabled');
+      return;
+    }
+    // Turn on — need to pick account/subaccount
+    const currentAccount = document.getElementById('fAccount').value;
+    const currentSub = document.getElementById('fSubAccount').value;
+
+    if (!currentAccount || currentAccount === '__custom__' || !currentSub || currentSub === '__custom__') {
+      showToast('error', '⚠ First select an Account and Sub-Account, then tap Enable Trip Mode to lock them in.');
+      // Scroll to account field to guide the user
+      document.getElementById('fAccount').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
+    tripMode = { active: true, account: currentAccount, subAccount: currentSub };
+    saveTripMode();
+    renderTripModeBanner();
+    showToast('success', `✈️ Trip Mode active — locked to ${currentAccount} → ${currentSub}`);
+  }
+
+  function applyTripMode() {
+    if (!tripMode.active) return;
+    // Ensure the account dropdown has this value (in case custom was added)
+    const accountSel = document.getElementById('fAccount');
+    if (!Array.from(accountSel.options).some(o => o.value === tripMode.account)) return;
+    accountSel.value = tripMode.account;
+    populateSubAccountDropdown(tripMode.account);
+    const subSel = document.getElementById('fSubAccount');
+    if (Array.from(subSel.options).some(o => o.value === tripMode.subAccount)) {
+      subSel.value = tripMode.subAccount;
+    }
+    document.getElementById('fAccountCustom').style.display = 'none';
+    document.getElementById('fSubAccountCustom').style.display = 'none';
+  }
+
+  // Render banner on page load
+  renderTripModeBanner();
 
   function populateAccountDropdown() {
     const sel = document.getElementById('fAccount');
@@ -1146,9 +1297,12 @@
         doc.setFont('helvetica', 'bold');
         doc.text('ORIGINAL RECEIPT IMAGE', 10, imgY);
 
-        // Preserve aspect ratio — fit within available area
-        const maxW = 190; // page width minus margins
-        const maxH = 230; // vertical space before footer
+        // Calculate actual available space between label and footer
+        const imageStartY = imgY + 4;
+        const footerStartY = 268; // footer begins at y=270, leave 2mm buffer
+        const maxW = 190;
+        const maxH = footerStartY - imageStartY;
+
         const ratio = compressed.width / compressed.height;
         let drawW = maxW;
         let drawH = drawW / ratio;
@@ -1158,7 +1312,7 @@
         }
         const drawX = 10 + (maxW - drawW) / 2; // center horizontally
 
-        doc.addImage(compressed.dataUrl, 'JPEG', drawX, imgY + 4, drawW, drawH, undefined, 'MEDIUM');
+        doc.addImage(compressed.dataUrl, 'JPEG', drawX, imageStartY, drawW, drawH, undefined, 'MEDIUM');
       } catch(e) { console.warn('Image embed failed', e); }
     } else if (uploadedFile && uploadedFile.type === 'application/pdf') {
       doc.setTextColor(80,80,80);
@@ -1366,6 +1520,7 @@
     document.getElementById('fSubAccountCustom').style.display = 'none';
     document.getElementById('fSubAccountCustom').value = '';
     populateSubAccountDropdown(null);
+    applyTripMode(); // re-apply locked account/subaccount if Trip Mode is active
     document.getElementById('generateBtn').disabled = true;
     const panel = document.getElementById('processAnotherPanel');
     if (panel) panel.style.display = 'none';
