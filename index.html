@@ -530,7 +530,7 @@
 
 <header>
   <div class="logo">RECEIPT<span>.</span>PROC</div>
-  <div class="badge">AI-Powered · Dropbox Ready</div>
+  <div class="badge">AI-Powered Receipt Converter</div>
 </header>
 
 <main>
@@ -660,34 +660,26 @@
       </div>
     </div>
 
-    <!-- BOTTOM: Dropbox -->
+    <!-- BOTTOM: Save Location -->
     <div class="panel full-col">
       <div class="panel-header">
         <div class="step-num">3</div>
-        <div class="panel-label">Dropbox Destination</div>
+        <div class="panel-label">Save PDF</div>
       </div>
       <div class="dropbox-section">
-        <div class="dropbox-connect">
-          <div class="dropbox-icon">📦</div>
-          <div class="dropbox-info">
-            <div class="name">Dropbox</div>
-            <div class="sub" id="dropboxSubText">Enter your Dropbox access token to enable direct save</div>
-          </div>
-          <div class="dropbox-status disconnected" id="dropboxStatusBadge">Disconnected</div>
+        <div style="font-size:12px; color:var(--muted); margin-bottom:14px; line-height:1.6;">
+          Choose where to save the generated PDF. On desktop and Android, you'll get a folder picker. On iPhone, the file goes to your Downloads and you can then move it anywhere (including your Dropbox folder via the Files app).
         </div>
-        <div class="field-group" style="margin-bottom:10px;">
-          <label class="field-label">Access Token <span style="color:var(--muted); font-size:9px;">· from dropbox.com/developers → App Console → Generated access token</span></label>
-          <div style="display:flex; gap:8px;">
-            <input type="password" id="dropboxToken" placeholder="sl.xxxxxxxxxxxxxxxxxxxxxxxx" style="flex:1; font-size:11px;" oninput="validateDropboxToken()" />
-            <button class="btn btn-secondary" style="flex:0; padding:10px 12px; font-size:11px;" onclick="toggleTokenVisibility()">👁</button>
-          </div>
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button class="btn btn-primary" style="flex:1; min-width:180px; padding:14px;" onclick="saveAsWithPicker()">
+            📁 Save As... (choose location)
+          </button>
+          <button class="btn btn-secondary" style="flex:1; min-width:180px; padding:14px;" onclick="saveToDownloads()">
+            ⬇ Quick Download
+          </button>
         </div>
-        <div class="path-input-row">
-          <input type="text" id="dropboxPath" value="/Receipts/" placeholder="/Receipts/2026/" />
-          <button class="btn btn-primary" style="flex:0; white-space:nowrap; padding:10px 14px; font-size:11px;" onclick="saveToDropbox()">Save to Dropbox</button>
-        </div>
-        <div style="font-size:10px; color:var(--muted); margin-top:8px;">
-          💡 Token is stored only in this browser session and never transmitted anywhere except Dropbox's API.
+        <div style="font-size:10px; color:var(--muted); margin-top:10px; line-height:1.6;">
+          💡 <strong>Tip:</strong> On iPhone, to send directly to Dropbox — tap Share in the download notification → choose Dropbox from the share sheet.
         </div>
       </div>
     </div>
@@ -711,7 +703,7 @@
 
   // ── Set this to your Render backend URL after deploying ──────────────────
   // e.g. 'https://receipt-processor-api.onrender.com'
-  const BACKEND_URL = 'https://receipt-processor-api-1.onrender.com';
+  const BACKEND_URL = 'YOUR_RENDER_URL_HERE';
 
   // ─── Upload Zone ───
   const uploadZone = document.getElementById('uploadZone');
@@ -974,15 +966,7 @@
 
     generatedPdfBlob = doc.output('blob');
 
-    // Download locally
-    const url = URL.createObjectURL(generatedPdfBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-
-    showToast('success', '✓ PDF downloaded: ' + filename);
+    showToast('success', '✓ PDF ready — use Save buttons below to save it');
     setRightStatus('success', 'PDF ready · ' + filename);
   }
 
@@ -992,67 +976,65 @@
     return `${m}/${d}/${y}`;
   }
 
-  // ─── Dropbox ───
-  function validateDropboxToken() {
-    const token = document.getElementById('dropboxToken').value.trim();
-    const badge = document.getElementById('dropboxStatusBadge');
-    const sub = document.getElementById('dropboxSubText');
-    if (token.length > 10) {
-      badge.className = 'dropbox-status connected';
-      badge.textContent = 'Token Set';
-      sub.textContent = 'Ready to save PDFs to your Dropbox';
-    } else {
-      badge.className = 'dropbox-status disconnected';
-      badge.textContent = 'Disconnected';
-      sub.textContent = 'Enter your Dropbox access token to enable direct save';
-    }
-  }
-
-  function toggleTokenVisibility() {
-    const inp = document.getElementById('dropboxToken');
-    inp.type = inp.type === 'password' ? 'text' : 'password';
-  }
-
-  async function saveToDropbox() {
-    if (!generatedPdfBlob) {
-      showToast('error', '⚠ Generate the PDF first before saving to Dropbox.');
-      return;
-    }
-    const token = document.getElementById('dropboxToken').value.trim();
-    if (!token || token.length < 10) {
-      showToast('error', '⚠ Enter your Dropbox access token first.');
-      return;
-    }
+  // ─── Save Functions ───
+  function getCurrentFilename() {
     const v = getFieldValues();
-    const filename = buildFilename(v) + '.pdf';
-    const folder = document.getElementById('dropboxPath').value.trim().replace(/\/?$/, '/');
-    const fullPath = folder + filename;
+    return buildFilename(v) + '.pdf';
+  }
 
-    showToast('active', '📦 Uploading to Dropbox...');
-
-    try {
-      const arrayBuffer = await generatedPdfBlob.arrayBuffer();
-      const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Dropbox-API-Arg': JSON.stringify({ path: fullPath, mode: 'add', autorename: true }),
-          'Content-Type': 'application/octet-stream'
-        },
-        body: arrayBuffer
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        showToast('success', '✓ Saved to Dropbox: ' + data.path_display);
-        setRightStatus('success', 'Saved to Dropbox · ' + filename);
-      } else {
-        const err = await res.json();
-        showToast('error', '✗ Dropbox error: ' + (err.error_summary || res.status));
-      }
-    } catch (e) {
-      showToast('error', '✗ Upload failed: ' + e.message);
+  // "Save As..." — uses File System Access API where supported (Chrome/Edge desktop, Android Chrome)
+  // Falls back to a regular download if not supported (iOS Safari, Firefox)
+  async function saveAsWithPicker() {
+    if (!generatedPdfBlob) {
+      showToast('error', '⚠ Generate the PDF first.');
+      return;
     }
+    const filename = getCurrentFilename();
+
+    // Check for File System Access API support
+    if ('showSaveFilePicker' in window) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: filename,
+          types: [{
+            description: 'PDF file',
+            accept: { 'application/pdf': ['.pdf'] }
+          }]
+        });
+        const writable = await handle.createWritable();
+        await writable.write(generatedPdfBlob);
+        await writable.close();
+        showToast('success', '✓ Saved: ' + handle.name);
+        setRightStatus('success', 'Saved · ' + handle.name);
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          showToast('error', '✗ Save failed: ' + err.message);
+        }
+      }
+    } else {
+      // Fallback for browsers without File System Access API (iOS Safari, Firefox)
+      showToast('active', '📁 Your browser will save to Downloads — move from there to your chosen location');
+      setTimeout(() => saveToDownloads(), 800);
+    }
+  }
+
+  // Quick download to default Downloads folder
+  function saveToDownloads() {
+    if (!generatedPdfBlob) {
+      showToast('error', '⚠ Generate the PDF first.');
+      return;
+    }
+    const filename = getCurrentFilename();
+    const url = URL.createObjectURL(generatedPdfBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('success', '✓ Downloaded: ' + filename);
+    setRightStatus('success', 'Downloaded · ' + filename);
   }
 
   // ─── Clear ───
