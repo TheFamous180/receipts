@@ -678,6 +678,15 @@
         <div style="font-size:10px; color:var(--muted); margin-top:10px; line-height:1.6;">
           💡 <strong>Tip:</strong> On iPhone, to send directly to Dropbox — tap Share in the download notification → choose Dropbox from the share sheet.
         </div>
+
+        <!-- Process Another prompt, hidden until save complete -->
+        <div id="processAnotherPanel" style="display:none; margin-top:18px; padding:16px; background:rgba(71,255,154,0.08); border:1px solid rgba(71,255,154,0.3); border-radius:8px;">
+          <div style="font-size:13px; margin-bottom:10px; color:var(--success);">✓ Receipt saved successfully</div>
+          <div style="font-size:11px; color:var(--muted); margin-bottom:12px;">Ready to process another receipt?</div>
+          <button class="btn btn-primary" style="width:100%; padding:14px;" onclick="startNewReceipt()">
+            ＋ Process Another Receipt
+          </button>
+        </div>
       </div>
     </div>
 
@@ -1233,6 +1242,7 @@
         await writable.close();
         showToast('success', '✓ Saved: ' + handle.name);
         setRightStatus('success', 'Saved · ' + handle.name);
+        showProcessAnotherPrompt();
       } catch (err) {
         if (err.name !== 'AbortError') {
           showToast('error', '✗ Save failed: ' + err.message);
@@ -1262,6 +1272,23 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     showToast('success', '✓ Downloaded: ' + filename);
     setRightStatus('success', 'Downloaded · ' + filename);
+    showProcessAnotherPrompt();
+  }
+
+  function showProcessAnotherPrompt() {
+    const panel = document.getElementById('processAnotherPanel');
+    panel.style.display = 'block';
+    // Smooth scroll to the button so it's front-and-center
+    setTimeout(() => panel.scrollIntoView({ behavior: 'smooth', block: 'center' }), 150);
+  }
+
+  function startNewReceipt() {
+    clearAll();
+    document.getElementById('processAnotherPanel').style.display = 'none';
+    // Scroll back up to the upload zone so the user is ready to go
+    setTimeout(() => {
+      document.getElementById('uploadZone').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
   }
 
   // ─── Clear ───
@@ -1291,6 +1318,8 @@
     document.getElementById('fSubAccountCustom').value = '';
     populateSubAccountDropdown(null);
     document.getElementById('generateBtn').disabled = true;
+    const panel = document.getElementById('processAnotherPanel');
+    if (panel) panel.style.display = 'none';
 
     setLeftStatus('', 'Awaiting upload');
     setRightStatus('', 'Waiting for upload');
