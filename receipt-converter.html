@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Receipt Processor</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap');
+
+  :root {
+    --bg: #0f0f0f;
+    --surface: #161616;
+    --surface2: #1e1e1e;
+    --border: #2a2a2a;
+    --accent: #e8ff47;
+    --accent2: #47d4ff;
+    --text: #f0f0f0;
+    --muted: #666;
+    --success: #47ff9a;
+    --error: #ff4747;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 18px;
+    letter-spacing: -0.5px;
+  }
+
+  .logo span { color: var(--accent); }
+
+  .badge {
+    font-size: 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 20px;
+    color: var(--muted);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+    padding: 32px;
+    gap: 24px;
+  }
+
+  @media (max-width: 768px) {
+    main { grid-template-columns: 1fr; padding: 16px; }
+  }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .panel-label {
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .step-num {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #000;
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Syne', sans-serif;
+  }
+
+  /* Upload Zone */
+  .upload-zone {
+    margin: 20px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 48px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+
+  .upload-zone:hover, .upload-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(232, 255, 71, 0.04);
+  }
+
+  .upload-zone input { display: none; }
+
+  .upload-icon {
+    font-size: 32px;
+    margin-bottom: 12px;
+    display: block;
+  }
+
+  .upload-zone h3 {
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .upload-zone p {
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .preview-img {
+    width: 100%;
+    border-radius: 6px;
+    display: block;
+  }
+
+  .preview-container {
+    margin: 20px;
+    position: relative;
+  }
+
+  .preview-overlay {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(0,0,0,0.7);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 10px;
+    color: var(--accent);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .replace-btn {
+    display: block;
+    width: calc(100% - 40px);
+    margin: 0 20px 20px;
+    padding: 10px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .replace-btn:hover { border-color: var(--text); color: var(--text); }
+
+  /* Analyzing state */
+  .analyzing {
+    display: none;
+    margin: 20px;
+    padding: 24px;
+    text-align: center;
+  }
+
+  .pulse-ring {
+    width: 48px;
+    height: 48px;
+    border: 2px solid var(--accent);
+    border-radius: 50%;
+    margin: 0 auto 16px;
+    animation: pulse 1.2s ease-in-out infinite;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .pulse-ring::after {
+    content: '';
+    width: 32px;
+    height: 32px;
+    background: var(--accent);
+    border-radius: 50%;
+    opacity: 0.15;
+    animation: pulse 1.2s ease-in-out infinite reverse;
+    position: absolute;
+  }
+
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.7; }
+  }
+
+  .analyzing p { font-size: 12px; color: var(--muted); }
+
+  /* Right panel - form */
+  .form-body { padding: 20px; }
+
+  .field-group { margin-bottom: 16px; }
+
+  .field-label {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .field-label .auto-tag {
+    display: inline-block;
+    background: rgba(71, 212, 255, 0.15);
+    color: var(--accent2);
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+    letter-spacing: 0.5px;
+  }
+
+  .field-label .manual-tag {
+    display: inline-block;
+    background: rgba(232, 255, 71, 0.12);
+    color: var(--accent);
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+    letter-spacing: 0.5px;
+  }
+
+  input[type="text"], select, textarea {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  input[type="text"]:focus, select:focus, textarea:focus {
+    border-color: var(--accent);
+  }
+
+  select option { background: var(--surface2); }
+
+  .account-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .filename-preview {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 20px;
+  }
+
+  .filename-preview .label {
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .filename-preview .value {
+    font-size: 12px;
+    color: var(--accent);
+    word-break: break-all;
+    line-height: 1.5;
+  }
+
+  .filename-preview .value.empty { color: var(--muted); font-style: italic; }
+
+  .actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    flex: 1;
+    padding: 12px 16px;
+    border-radius: 6px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s;
+    letter-spacing: 0.5px;
+    text-align: center;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #000;
+  }
+
+  .btn-primary:hover { background: #d4e83a; transform: translateY(-1px); }
+  .btn-primary:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; transform: none; }
+
+  .btn-secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  .btn-secondary:hover { border-color: var(--text); }
+
+  /* Status bar */
+  .status-bar {
+    padding: 12px 20px;
+    background: var(--surface2);
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+  }
+
+  .status-bar.success { color: var(--success); }
+  .status-bar.error { color: var(--error); }
+  .status-bar.active { color: var(--accent2); }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+  }
+
+  /* Divider label */
+  .two-col {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  @media (max-width: 768px) {
+    .two-col { grid-template-columns: 1fr; }
+  }
+
+  .full-col { grid-column: 1 / -1; }
+
+  /* Dropbox section */
+  .dropbox-section {
+    padding: 16px 20px 20px;
+  }
+
+  .dropbox-connect {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 12px;
+  }
+
+  .dropbox-icon {
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+
+  .dropbox-info { flex: 1; }
+  .dropbox-info .name { font-size: 12px; font-weight: 500; }
+  .dropbox-info .sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+  .dropbox-status {
+    font-size: 10px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+  }
+
+  .dropbox-status.connected { background: rgba(71,255,154,0.15); color: var(--success); }
+  .dropbox-status.disconnected { background: var(--surface); border: 1px solid var(--border); color: var(--muted); cursor: pointer; }
+
+  .path-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .path-input-row input { flex: 1; font-size: 11px; }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 12px;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+    max-width: 320px;
+  }
+
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast.success { border-color: var(--success); }
+  .toast.error { border-color: var(--error); }
+
+  .upload-btn-row {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  .upload-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 140px;
+    justify-content: center;
+  }
+
+  .upload-btn:hover, .upload-btn:active {
+    border-color: var(--accent);
+    background: rgba(232,255,71,0.06);
+    color: var(--accent);
+  }
+
+  @media (max-width: 480px) {
+    .upload-btn { min-width: 120px; font-size: 12px; padding: 14px 16px; }
+  }
+
+  input[readonly] {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .waiting-state {
+    padding: 48px 20px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.8;
+  }
+
+  .waiting-state .icon { font-size: 28px; margin-bottom: 12px; display: block; opacity: 0.4; }
+
+  .error-section {
+    margin: 20px;
+    padding: 14px;
+    background: rgba(255,71,71,0.08);
+    border: 1px solid rgba(255,71,71,0.3);
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--error);
+    line-height: 1.8;
+    display: none;
+  }
+
+  .error-section strong { color: #ff6b6b; }
+  .error-section code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; font-size: 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">RECEIPT<span>.</span>PROC</div>
+  <div class="badge">AI-Powered · Dropbox Ready</div>
+</header>
+
+<main>
+  <div class="two-col">
+
+    <!-- LEFT: Upload + Preview -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="step-num">1</div>
+        <div class="panel-label">Upload Receipt</div>
+      </div>
+
+      <div id="uploadZone" class="upload-zone">
+        <input type="file" id="fileInput" accept="image/*,application/pdf">
+        <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none;">
+        <span class="upload-icon">📄</span>
+        <h3>Upload Receipt</h3>
+        <p style="margin-bottom:16px;">Drag &amp; drop · or use buttons below</p>
+        <div class="upload-btn-row">
+          <button class="upload-btn" onclick="event.stopPropagation(); document.getElementById('cameraInput').click();">
+            <span>📷</span> Take Photo
+          </button>
+          <button class="upload-btn" onclick="event.stopPropagation(); document.getElementById('fileInput').click();">
+            <span>🗂️</span> Choose File
+          </button>
+        </div>
+        <p style="font-size:10px; margin-top:10px; color:var(--muted);">JPG · PNG · HEIC · PDF</p>
+      </div>
+
+      <div id="previewContainer" class="preview-container" style="display:none;">
+        <img id="previewImg" class="preview-img" />
+        <div class="preview-overlay">UPLOADED</div>
+        <div id="pdfPreviewMsg" style="display:none; padding:12px; font-size:11px; color:var(--muted); text-align:center;">PDF uploaded — content extracted for processing</div>
+      </div>
+
+      <div id="analyzingState" class="analyzing">
+        <div class="pulse-ring"></div>
+        <p>Analyzing receipt with AI...</p>
+      </div>
+
+      <div id="errorSection" class="error-section"></div>
+
+      <button id="replaceBtn" class="replace-btn" style="display:none;" onclick="resetToUpload()">↑ Replace Receipt</button>
+
+      <div class="status-bar" id="leftStatus">
+        <div class="dot"></div>
+        <span>Awaiting upload</span>
+      </div>
+    </div>
+
+    <!-- RIGHT: Review & Edit -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="step-num">2</div>
+        <div class="panel-label">Review & Edit Details</div>
+      </div>
+
+      <div id="waitingState" class="waiting-state">
+        <span class="icon">🔍</span>
+        Upload a receipt to extract details
+      </div>
+
+      <div id="formBody" class="form-body" style="display:none;">
+
+        <div class="field-group">
+          <label class="field-label">Vendor <span class="auto-tag">AUTO</span></label>
+          <input type="text" id="fVendor" placeholder="e.g. Amazon" />
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="field-group">
+            <label class="field-label">Last 5 CC <span class="auto-tag">AUTO</span></label>
+            <input type="text" id="fCC" placeholder="e.g. 31087" maxlength="5" />
+          </div>
+          <div class="field-group">
+            <label class="field-label">Amount <span class="auto-tag">AUTO</span></label>
+            <input type="text" id="fAmount" placeholder="e.g. $77.21" />
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">Date <span class="auto-tag">AUTO</span></label>
+          <input type="text" id="fDate" placeholder="e.g. 01192026 (MMDDYYYY)" maxlength="8" />
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">Account <span class="manual-tag">MANUAL</span></label>
+          <select id="fAccount" onchange="handleAccountChange()">
+            <option value="">-- Select Account --</option>
+            <option value="Xerox">Xerox</option>
+            <option value="Microsoft">Microsoft</option>
+            <option value="IBM">IBM</option>
+            <option value="Deloitte">Deloitte</option>
+            <option value="General">General</option>
+            <option value="__custom__">+ Custom Account...</option>
+          </select>
+          <input type="text" id="fAccountCustom" placeholder="Type account name" style="display:none; margin-top:6px;" />
+        </div>
+
+        <div class="field-group">
+          <label class="field-label">Sub-Account <span class="manual-tag">MANUAL</span></label>
+          <select id="fSubAccount" onchange="handleSubAccountChange()">
+            <option value="">-- Select Sub-Account --</option>
+            <option value="XeroxBL">XeroxBL</option>
+            <option value="XeroxOPS">XeroxOPS</option>
+            <option value="XeroxIT">XeroxIT</option>
+            <option value="General">General</option>
+            <option value="__custom__">+ Custom Sub-Account...</option>
+          </select>
+          <input type="text" id="fSubAccountCustom" placeholder="Type sub-account name" style="display:none; margin-top:6px;" />
+        </div>
+
+        <div class="filename-preview">
+          <div class="label">Generated Filename</div>
+          <div class="value" id="filenamePreview">— fill in all fields above —</div>
+        </div>
+
+        <div class="actions">
+          <button class="btn btn-secondary" id="clearBtn" onclick="clearAll()">Clear</button>
+          <button class="btn btn-primary" id="generateBtn" onclick="generatePDF()" disabled>Generate PDF</button>
+        </div>
+      </div>
+
+      <div class="status-bar" id="rightStatus">
+        <div class="dot"></div>
+        <span>Waiting for upload</span>
+      </div>
+    </div>
+
+    <!-- BOTTOM: Dropbox -->
+    <div class="panel full-col">
+      <div class="panel-header">
+        <div class="step-num">3</div>
+        <div class="panel-label">Dropbox Destination</div>
+      </div>
+      <div class="dropbox-section">
+        <div class="dropbox-connect">
+          <div class="dropbox-icon">📦</div>
+          <div class="dropbox-info">
+            <div class="name">Dropbox</div>
+            <div class="sub" id="dropboxSubText">Enter your Dropbox access token to enable direct save</div>
+          </div>
+          <div class="dropbox-status disconnected" id="dropboxStatusBadge">Disconnected</div>
+        </div>
+        <div class="field-group" style="margin-bottom:10px;">
+          <label class="field-label">Access Token <span style="color:var(--muted); font-size:9px;">· from dropbox.com/developers → App Console → Generated access token</span></label>
+          <div style="display:flex; gap:8px;">
+            <input type="password" id="dropboxToken" placeholder="sl.xxxxxxxxxxxxxxxxxxxxxxxx" style="flex:1; font-size:11px;" oninput="validateDropboxToken()" />
+            <button class="btn btn-secondary" style="flex:0; padding:10px 12px; font-size:11px;" onclick="toggleTokenVisibility()">👁</button>
+          </div>
+        </div>
+        <div class="path-input-row">
+          <input type="text" id="dropboxPath" value="/Receipts/" placeholder="/Receipts/2026/" />
+          <button class="btn btn-primary" style="flex:0; white-space:nowrap; padding:10px 14px; font-size:11px;" onclick="saveToDropbox()">Save to Dropbox</button>
+        </div>
+        <div style="font-size:10px; color:var(--muted); margin-top:8px;">
+          💡 Token is stored only in this browser session and never transmitted anywhere except Dropbox's API.
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<div class="toast" id="toast">
+  <span id="toastIcon">✓</span>
+  <span id="toastMsg">Done</span>
+</div>
+
+<script>
+  const ACCOUNTS = ['Xerox', 'Microsoft', 'IBM', 'Deloitte', 'General'];
+  const SUB_ACCOUNTS = ['XeroxBL', 'XeroxOPS', 'XeroxIT', 'General'];
+
+  let uploadedFile = null;
+  let uploadedFileBase64 = null;
+  let generatedPdfBlob = null;
+  let isConnectedToDropbox = false;
+
+  // ── Set this to your Render backend URL after deploying ──────────────────
+  // e.g. 'https://receipt-processor-api.onrender.com'
+  const BACKEND_URL = 'https://receipt-processor-api-1.onrender.com';
+
+  // ─── Upload Zone ───
+  const uploadZone = document.getElementById('uploadZone');
+  const fileInput = document.getElementById('fileInput');
+  const cameraInput = document.getElementById('cameraInput');
+
+  uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+  uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+  cameraInput.addEventListener('change', () => { if (cameraInput.files[0]) handleFile(cameraInput.files[0]); });
+
+  function resetToUpload() {
+    document.getElementById('uploadZone').style.display = 'block';
+    document.getElementById('previewContainer').style.display = 'none';
+    document.getElementById('replaceBtn').style.display = 'none';
+    document.getElementById('analyzingState').style.display = 'none';
+    document.getElementById('errorSection').style.display = 'none';
+    fileInput.value = '';
+    cameraInput.value = '';
+  }
+
+  function handleFile(file) {
+    uploadedFile = file;
+    const reader = new FileReader();
+    reader.onload = e => {
+      uploadedFileBase64 = e.target.result.split(',')[1];
+      const isPdf = file.type === 'application/pdf';
+
+      if (isPdf) {
+        document.getElementById('previewImg').style.display = 'none';
+        document.getElementById('pdfPreviewMsg').style.display = 'block';
+      } else {
+        document.getElementById('previewImg').src = e.target.result;
+        document.getElementById('previewImg').style.display = 'block';
+        document.getElementById('pdfPreviewMsg').style.display = 'none';
+      }
+
+      document.getElementById('uploadZone').style.display = 'none';
+      document.getElementById('previewContainer').style.display = 'block';
+      document.getElementById('replaceBtn').style.display = 'block';
+      document.getElementById('errorSection').style.display = 'none';
+
+      setLeftStatus('active', 'Analyzing receipt...');
+      showAnalyzing(true);
+      extractReceiptData(file);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function showAnalyzing(show) {
+    document.getElementById('analyzingState').style.display = show ? 'block' : 'none';
+  }
+
+  function setLeftStatus(type, msg) {
+    const el = document.getElementById('leftStatus');
+    el.className = `status-bar ${type}`;
+    el.innerHTML = `<div class="dot"></div><span>${msg}</span>`;
+  }
+
+  function setRightStatus(type, msg) {
+    const el = document.getElementById('rightStatus');
+    el.className = `status-bar ${type}`;
+    el.innerHTML = `<div class="dot"></div><span>${msg}</span>`;
+  }
+
+  // ─── AI Extraction ───
+  async function extractReceiptData(file) {
+    const isPdf = file.type === 'application/pdf';
+    const mediaType = isPdf ? 'application/pdf' : (file.type || 'image/jpeg');
+
+    // Detect placeholder URL
+    if (!BACKEND_URL || BACKEND_URL === 'YOUR_RENDER_URL_HERE') {
+      showExtractionError('Backend URL not configured. Open the HTML file and set <code>BACKEND_URL</code> to your Render deployment URL, then re-upload to GitHub Pages.');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageBase64: uploadedFileBase64, mediaType })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData?.error || `Server error ${res.status}`);
+      }
+
+      const parsed = await res.json();
+
+      showAnalyzing(false);
+      document.getElementById('waitingState').style.display = 'none';
+      document.getElementById('formBody').style.display = 'block';
+
+      document.getElementById('fVendor').value = parsed.vendor || '';
+      document.getElementById('fCC').value = parsed.last5cc || '';
+      document.getElementById('fAmount').value = parsed.amount || '';
+      document.getElementById('fDate').value = parsed.date || '';
+
+      updateFilenamePreview();
+      setLeftStatus('success', 'Extraction complete — review below');
+      setRightStatus('active', 'Edit fields, then generate PDF');
+
+      ['fVendor','fCC','fAmount','fDate'].forEach(id => {
+        document.getElementById(id).addEventListener('input', updateFilenamePreview);
+      });
+
+    } catch (err) {
+      showExtractionError(`✗ Extraction failed — ${err.message}<br><br>Check your internet connection, or fill in the fields manually below.`);
+    }
+  }
+
+  function showExtractionError(msg) {
+    showAnalyzing(false);
+    document.getElementById('waitingState').style.display = 'none';
+    document.getElementById('formBody').style.display = 'block';
+    const errEl = document.getElementById('errorSection');
+    errEl.style.display = 'block';
+    errEl.innerHTML = msg;
+    setLeftStatus('error', 'Extraction failed — fill in manually');
+    ['fVendor','fCC','fAmount','fDate'].forEach(id => {
+      document.getElementById(id).addEventListener('input', updateFilenamePreview);
+    });
+  }
+
+  // ─── Account dropdowns ───
+  function handleAccountChange() {
+    const sel = document.getElementById('fAccount').value;
+    const custom = document.getElementById('fAccountCustom');
+    custom.style.display = sel === '__custom__' ? 'block' : 'none';
+    if (sel === '__custom__') custom.addEventListener('input', updateFilenamePreview);
+    updateFilenamePreview();
+  }
+
+  function handleSubAccountChange() {
+    const sel = document.getElementById('fSubAccount').value;
+    const custom = document.getElementById('fSubAccountCustom');
+    custom.style.display = sel === '__custom__' ? 'block' : 'none';
+    if (sel === '__custom__') custom.addEventListener('input', updateFilenamePreview);
+    updateFilenamePreview();
+  }
+
+  document.getElementById('fAccount').addEventListener('change', updateFilenamePreview);
+  document.getElementById('fSubAccount').addEventListener('change', updateFilenamePreview);
+
+  // ─── Filename Preview ───
+  function getFieldValues() {
+    const vendor = document.getElementById('fVendor').value.trim();
+    const cc = document.getElementById('fCC').value.trim();
+    const amount = document.getElementById('fAmount').value.trim();
+    const date = document.getElementById('fDate').value.trim();
+
+    let account = document.getElementById('fAccount').value;
+    if (account === '__custom__') account = document.getElementById('fAccountCustom').value.trim();
+
+    let subAccount = document.getElementById('fSubAccount').value;
+    if (subAccount === '__custom__') subAccount = document.getElementById('fSubAccountCustom').value.trim();
+
+    return { vendor, cc, amount, date, account, subAccount };
+  }
+
+  function buildFilename(v) {
+    const parts = [];
+    if (v.vendor) parts.push(v.vendor);
+    if (v.cc) parts.push(v.cc);
+    if (v.amount) parts.push(v.amount);
+    if (v.date) parts.push(v.date);
+    if (v.account && v.subAccount) parts.push(`${v.account}-${v.subAccount}`);
+    else if (v.account) parts.push(v.account);
+    return parts.join('_');
+  }
+
+  function updateFilenamePreview() {
+    const v = getFieldValues();
+    const fn = buildFilename(v);
+    const el = document.getElementById('filenamePreview');
+    if (fn) {
+      el.textContent = fn + '.pdf';
+      el.className = 'value';
+    } else {
+      el.textContent = '— fill in all fields above —';
+      el.className = 'value empty';
+    }
+    const allFilled = v.vendor && v.cc && v.amount && v.date && v.account && v.subAccount;
+    document.getElementById('generateBtn').disabled = !allFilled || !uploadedFile;
+  }
+
+  // ─── PDF Generation ───
+  async function generatePDF() {
+    const v = getFieldValues();
+    const filename = buildFilename(v) + '.pdf';
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'letter' });
+
+    // Header bar
+    doc.setFillColor(15, 15, 15);
+    doc.rect(0, 0, 216, 20, 'F');
+    doc.setTextColor(232, 255, 71);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('RECEIPT RECORD', 10, 13);
+    doc.setTextColor(150, 150, 150);
+    doc.setFontSize(8);
+    doc.text(filename, 216 - 10, 13, { align: 'right' });
+
+    // Meta fields
+    const fields = [
+      ['Vendor', v.vendor],
+      ['Credit Card (Last 5)', v.cc],
+      ['Amount', v.amount],
+      ['Transaction Date', formatDateDisplay(v.date)],
+      ['Account', v.account],
+      ['Sub-Account', v.subAccount],
+      ['Processed', new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })]
+    ];
+
+    let y = 30;
+    doc.setFontSize(9);
+    fields.forEach(([label, val]) => {
+      doc.setTextColor(120, 120, 120);
+      doc.setFont('helvetica', 'normal');
+      doc.text(label.toUpperCase(), 10, y);
+      doc.setTextColor(30, 30, 30);
+      doc.setFont('helvetica', 'bold');
+      doc.text(val || '—', 80, y);
+      doc.setDrawColor(230, 230, 230);
+      doc.line(10, y + 3, 200, y + 3);
+      y += 10;
+    });
+
+    // Embed receipt image
+    if (uploadedFile && uploadedFile.type.startsWith('image/')) {
+      try {
+        const ext = uploadedFile.type.includes('png') ? 'PNG' : 'JPEG';
+        const imgData = 'data:' + uploadedFile.type + ';base64,' + uploadedFileBase64;
+        const imgY = y + 6;
+        doc.setTextColor(80, 80, 80);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        doc.text('ORIGINAL RECEIPT IMAGE', 10, imgY);
+        doc.addImage(imgData, ext, 10, imgY + 4, 190, 130, undefined, 'FAST');
+      } catch(e) { console.warn('Image embed failed', e); }
+    } else if (uploadedFile && uploadedFile.type === 'application/pdf') {
+      doc.setTextColor(80,80,80);
+      doc.setFontSize(8);
+      doc.text('Original receipt uploaded as PDF — see source file for full detail.', 10, y + 10);
+    }
+
+    // Footer
+    doc.setFillColor(240, 240, 240);
+    doc.rect(0, 270, 216, 10, 'F');
+    doc.setTextColor(150, 150, 150);
+    doc.setFontSize(7);
+    doc.text('Generated by Receipt Processor · ' + new Date().toISOString(), 10, 276);
+
+    generatedPdfBlob = doc.output('blob');
+
+    // Download locally
+    const url = URL.createObjectURL(generatedPdfBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    showToast('success', '✓ PDF downloaded: ' + filename);
+    setRightStatus('success', 'PDF ready · ' + filename);
+  }
+
+  function formatDateDisplay(raw) {
+    if (!raw || raw.length !== 8) return raw;
+    const m = raw.slice(0,2), d = raw.slice(2,4), y = raw.slice(4);
+    return `${m}/${d}/${y}`;
+  }
+
+  // ─── Dropbox ───
+  function validateDropboxToken() {
+    const token = document.getElementById('dropboxToken').value.trim();
+    const badge = document.getElementById('dropboxStatusBadge');
+    const sub = document.getElementById('dropboxSubText');
+    if (token.length > 10) {
+      badge.className = 'dropbox-status connected';
+      badge.textContent = 'Token Set';
+      sub.textContent = 'Ready to save PDFs to your Dropbox';
+    } else {
+      badge.className = 'dropbox-status disconnected';
+      badge.textContent = 'Disconnected';
+      sub.textContent = 'Enter your Dropbox access token to enable direct save';
+    }
+  }
+
+  function toggleTokenVisibility() {
+    const inp = document.getElementById('dropboxToken');
+    inp.type = inp.type === 'password' ? 'text' : 'password';
+  }
+
+  async function saveToDropbox() {
+    if (!generatedPdfBlob) {
+      showToast('error', '⚠ Generate the PDF first before saving to Dropbox.');
+      return;
+    }
+    const token = document.getElementById('dropboxToken').value.trim();
+    if (!token || token.length < 10) {
+      showToast('error', '⚠ Enter your Dropbox access token first.');
+      return;
+    }
+    const v = getFieldValues();
+    const filename = buildFilename(v) + '.pdf';
+    const folder = document.getElementById('dropboxPath').value.trim().replace(/\/?$/, '/');
+    const fullPath = folder + filename;
+
+    showToast('active', '📦 Uploading to Dropbox...');
+
+    try {
+      const arrayBuffer = await generatedPdfBlob.arrayBuffer();
+      const res = await fetch('https://content.dropboxapi.com/2/files/upload', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Dropbox-API-Arg': JSON.stringify({ path: fullPath, mode: 'add', autorename: true }),
+          'Content-Type': 'application/octet-stream'
+        },
+        body: arrayBuffer
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        showToast('success', '✓ Saved to Dropbox: ' + data.path_display);
+        setRightStatus('success', 'Saved to Dropbox · ' + filename);
+      } else {
+        const err = await res.json();
+        showToast('error', '✗ Dropbox error: ' + (err.error_summary || res.status));
+      }
+    } catch (e) {
+      showToast('error', '✗ Upload failed: ' + e.message);
+    }
+  }
+
+  // ─── Clear ───
+  function clearAll() {
+    uploadedFile = null;
+    uploadedFileBase64 = null;
+    generatedPdfBlob = null;
+
+    document.getElementById('uploadZone').style.display = 'block';
+    document.getElementById('previewContainer').style.display = 'none';
+    document.getElementById('replaceBtn').style.display = 'none';
+    document.getElementById('formBody').style.display = 'none';
+    document.getElementById('waitingState').style.display = 'block';
+    document.getElementById('errorSection').style.display = 'none';
+    document.getElementById('analyzingState').style.display = 'none';
+    fileInput.value = '';
+    cameraInput.value = '';
+
+    ['fVendor','fCC','fAmount','fDate'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('fAccount').value = '';
+    document.getElementById('fSubAccount').value = '';
+    document.getElementById('fAccountCustom').style.display = 'none';
+    document.getElementById('fSubAccountCustom').style.display = 'none';
+    document.getElementById('generateBtn').disabled = true;
+
+    setLeftStatus('', 'Awaiting upload');
+    setRightStatus('', 'Waiting for upload');
+    updateFilenamePreview();
+  }
+
+  // ─── Toast ───
+  function showToast(type, msg) {
+    const t = document.getElementById('toast');
+    document.getElementById('toastMsg').textContent = msg;
+    t.className = `toast ${type} show`;
+    setTimeout(() => t.classList.remove('show'), 4000);
+  }
+</script>
+</body>
+</html>
