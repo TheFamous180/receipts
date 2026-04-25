@@ -731,7 +731,7 @@
         <div class="setup-step-label">Step 1 of 3</div>
         <h3>Your card number</h3>
         <p>Enter the last 5 digits of the credit card you'll use most often. You can add more cards later.</p>
-        <input type="text" id="setupCard" maxlength="5" inputmode="numeric" placeholder="e.g. 31087" onkeydown="if(event.key==='Enter'){event.preventDefault();setupNextStep(1);}" />
+        <input type="text" id="setupCard" maxlength="5" inputmode="numeric" placeholder="e.g. 12345" onkeydown="if(event.key==='Enter'){event.preventDefault();setupNextStep(1);}" />
         <button class="btn btn-primary" style="width:100%; padding:14px; margin-top:16px;" onclick="setupNextStep(1)">Next →</button>
       </div>
 
@@ -854,7 +854,6 @@
             <label class="field-label">Card Used <span class="manual-tag">MANUAL</span></label>
             <select id="fCard" onchange="handleCardChange()">
               <option value="">-- Select Card --</option>
-              <option value="31087" selected>31087</option>
               <option value="__custom__">+ Add New Card...</option>
             </select>
             <input type="text" id="fCardCustom" placeholder="Enter last 5 digits" maxlength="5" style="display:none; margin-top:6px;" />
