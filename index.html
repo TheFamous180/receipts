@@ -155,6 +155,7 @@
     width: 100%;
     border-radius: 6px;
     display: block;
+    transition: transform 0.3s ease;
   }
 
   .preview-container {
@@ -812,6 +813,9 @@
       <div id="previewContainer" class="preview-container" style="display:none;">
         <img id="previewImg" class="preview-img" />
         <div class="preview-overlay">UPLOADED</div>
+        <button id="rotateBtn" onclick="rotatePreview()" title="Rotate 90°" style="display:none; position:absolute; top:8px; left:8px; background:rgba(0,0,0,0.7); border:1px solid var(--border); color:var(--text); width:36px; height:36px; border-radius:6px; cursor:pointer; font-size:16px; display:flex; align-items:center; justify-content:center; padding:0;">
+          ↻
+        </button>
         <div id="pdfPreviewMsg" style="display:none; padding:12px; font-size:11px; color:var(--muted); text-align:center;">PDF uploaded — content extracted for processing</div>
       </div>
 
@@ -886,6 +890,9 @@
             <option value="">-- Select Account first --</option>
           </select>
           <input type="text" id="fSubAccountCustom" placeholder="Type sub-account name" style="display:none; margin-top:6px;" />
+          <button id="inlineTripBtn" onclick="toggleTripMode()" style="display:none; margin-top:10px; width:100%; padding:10px; font-size:11px; background:rgba(71,212,255,0.12); border:1px solid rgba(71,212,255,0.5); color:var(--accent2); border-radius:6px; cursor:pointer; font-family:'DM Mono',monospace;">
+            ✈️ Lock these for Trip Mode
+          </button>
         </div>
 
         <div class="filename-preview">
@@ -954,6 +961,7 @@
 
   let uploadedFile = null;
   let uploadedFileBase64 = null;
+  let rotationDegrees = 0; // 0, 90, 180, or 270
   let generatedPdfBlob = null;
   let isConnectedToDropbox = false;
 
@@ -977,6 +985,7 @@
   cameraInput.addEventListener('change', () => { if (cameraInput.files[0]) handleFile(cameraInput.files[0]); });
 
   function resetToUpload() {
+    rotationDegrees = 0;
     document.getElementById('uploadZone').style.display = 'block';
     document.getElementById('previewContainer').style.display = 'none';
     document.getElementById('replaceBtn').style.display = 'none';
@@ -988,6 +997,7 @@
 
   function handleFile(file) {
     uploadedFile = file;
+    rotationDegrees = 0; // reset rotation for new upload
     const reader = new FileReader();
     reader.onload = e => {
       uploadedFileBase64 = e.target.result.split(',')[1];
@@ -996,10 +1006,14 @@
       if (isPdf) {
         document.getElementById('previewImg').style.display = 'none';
         document.getElementById('pdfPreviewMsg').style.display = 'block';
+        document.getElementById('rotateBtn').style.display = 'none';
       } else {
-        document.getElementById('previewImg').src = e.target.result;
-        document.getElementById('previewImg').style.display = 'block';
+        const img = document.getElementById('previewImg');
+        img.src = e.target.result;
+        img.style.display = 'block';
+        img.style.transform = ''; // clear any previous rotation
         document.getElementById('pdfPreviewMsg').style.display = 'none';
+        document.getElementById('rotateBtn').style.display = 'flex';
       }
 
       document.getElementById('uploadZone').style.display = 'none';
@@ -1276,7 +1290,7 @@
     localStorage.removeItem(STORAGE_KEYS.subAccounts);
     localStorage.removeItem(STORAGE_KEYS.cards);
     localStorage.removeItem(MIGRATION_KEY);
-    sessionStorage.removeItem(TRIP_MODE_KEY);
+    localStorage.removeItem(TRIP_MODE_KEY);
     location.reload();
   }
 
@@ -1287,14 +1301,14 @@
 
   function loadTripMode() {
     try {
-      return JSON.parse(sessionStorage.getItem(TRIP_MODE_KEY)) || { active: false, account: '', subAccount: '' };
+      return JSON.parse(localStorage.getItem(TRIP_MODE_KEY)) || { active: false, account: '', subAccount: '' };
     } catch (e) {
       return { active: false, account: '', subAccount: '' };
     }
   }
 
   function saveTripMode() {
-    try { sessionStorage.setItem(TRIP_MODE_KEY, JSON.stringify(tripMode)); } catch(e) {}
+    try { localStorage.setItem(TRIP_MODE_KEY, JSON.stringify(tripMode)); } catch(e) {}
   }
 
   function renderTripModeBanner() {
@@ -1305,7 +1319,7 @@
     if (tripMode.active) {
       banner.classList.add('active');
       label.textContent = `Trip Mode: ${tripMode.account}_${tripMode.subAccount}`;
-      sub.textContent = 'Account & sub-account will auto-fill for every receipt this session';
+      sub.textContent = 'Account & sub-account auto-fill for every receipt — stays on across sessions until you disable';
       btn.textContent = 'Disable';
     } else {
       banner.classList.remove('active');
@@ -1313,6 +1327,8 @@
       sub.textContent = 'Auto-fills account & sub-account for every receipt';
       btn.textContent = 'Enable Trip Mode';
     }
+    // Sync the inline button visibility too
+    if (typeof updateInlineTripButton === 'function') updateInlineTripButton();
   }
 
   function toggleTripMode() {
@@ -1434,6 +1450,7 @@
     document.getElementById('fSubAccountCustom').style.display = 'none';
     document.getElementById('fSubAccountCustom').value = '';
     updateFilenamePreview();
+    updateInlineTripButton();
   }
 
   function saveCustomAccount() {
@@ -1465,6 +1482,23 @@
       custom.value = '';
     }
     updateFilenamePreview();
+    updateInlineTripButton();
+  }
+
+  function updateInlineTripButton() {
+    const btn = document.getElementById('inlineTripBtn');
+    if (!btn) return;
+    // Only show button if Trip Mode is off AND both account+subaccount are selected
+    const acc = document.getElementById('fAccount').value;
+    const sub = document.getElementById('fSubAccount').value;
+    const validAcc = acc && acc !== '__custom__';
+    const validSub = sub && sub !== '__custom__';
+    if (!tripMode.active && validAcc && validSub) {
+      btn.style.display = 'block';
+      btn.innerHTML = `✈️ Lock ${acc}_${sub} for Trip Mode`;
+    } else {
+      btn.style.display = 'none';
+    }
   }
 
   function saveCustomSubAccount() {
@@ -1673,68 +1707,40 @@
   // Resizes image so longest edge ≤ maxEdge, re-encodes as JPEG at given quality.
   // Drops receipt photos from multi-MB down to ~200-400 KB with no visible quality loss.
   // Also corrects EXIF orientation so rotated phone photos come out upright.
+  // ─── Rotate preview (user-controlled) ───
+  function rotatePreview() {
+    rotationDegrees = (rotationDegrees + 90) % 360;
+    const img = document.getElementById('previewImg');
+    img.style.transform = `rotate(${rotationDegrees}deg)`;
+    // Add a small visual confirmation
+    const btn = document.getElementById('rotateBtn');
+    btn.style.transition = 'transform 0.2s';
+    btn.style.transform = 'scale(0.9)';
+    setTimeout(() => { btn.style.transform = 'scale(1)'; }, 150);
+  }
+
+  // ─── Image compression with user rotation applied ───
+  // The rotationDegrees variable controls how the image is baked into the PDF.
   async function compressImage(file, maxEdge = 1600, quality = 0.7) {
-    // createImageBitmap with imageOrientation:'from-image' reads EXIF and rotates the pixels.
-    // Supported on iOS Safari 17+, Chrome, Firefox, Edge.
+    // createImageBitmap reads EXIF and rotates the pixels.
     let bitmap;
     try {
       bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
     } catch (e) {
-      // Fallback for older browsers: load via Image tag (won't auto-rotate but at least renders)
       console.warn('createImageBitmap failed, using fallback:', e);
       return compressImageFallback(file, maxEdge, quality);
     }
 
-    let { width, height } = bitmap;
-    // Scale down if needed
-    if (width > maxEdge || height > maxEdge) {
-      if (width > height) {
-        height = Math.round(height * (maxEdge / width));
-        width = maxEdge;
-      } else {
-        width = Math.round(width * (maxEdge / height));
-        height = maxEdge;
-      }
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, width, height);
-    ctx.drawImage(bitmap, 0, 0, width, height);
-    bitmap.close?.();
-
-    const dataUrl = canvas.toDataURL('image/jpeg', quality);
-    return { dataUrl, width, height };
+    return drawWithRotation(bitmap, rotationDegrees, maxEdge, quality);
   }
 
-  // Fallback for older browsers without createImageBitmap orientation support
   function compressImageFallback(file, maxEdge, quality) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = e => {
         const img = new Image();
         img.onload = () => {
-          let { width, height } = img;
-          if (width > maxEdge || height > maxEdge) {
-            if (width > height) {
-              height = Math.round(height * (maxEdge / width));
-              width = maxEdge;
-            } else {
-              width = Math.round(width * (maxEdge / height));
-              height = maxEdge;
-            }
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, width, height);
-          ctx.drawImage(img, 0, 0, width, height);
-          resolve({ dataUrl: canvas.toDataURL('image/jpeg', quality), width, height });
+          resolve(drawWithRotation(img, rotationDegrees, maxEdge, quality));
         };
         img.onerror = reject;
         img.src = e.target.result;
@@ -1742,6 +1748,42 @@
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
+  }
+
+  // Shared draw routine — handles 0/90/180/270 rotation correctly
+  function drawWithRotation(source, degrees, maxEdge, quality) {
+    let srcW = source.width;
+    let srcH = source.height;
+
+    // Scale source down if needed (keeps original aspect)
+    if (srcW > maxEdge || srcH > maxEdge) {
+      if (srcW > srcH) {
+        srcH = Math.round(srcH * (maxEdge / srcW));
+        srcW = maxEdge;
+      } else {
+        srcW = Math.round(srcW * (maxEdge / srcH));
+        srcH = maxEdge;
+      }
+    }
+
+    // For 90 or 270 degrees, swap canvas dimensions
+    const swap = (degrees === 90 || degrees === 270);
+    const canvas = document.createElement('canvas');
+    canvas.width = swap ? srcH : srcW;
+    canvas.height = swap ? srcW : srcH;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Translate to center, rotate, then draw with offset
+    ctx.translate(canvas.width / 2, canvas.height / 2);
+    ctx.rotate((degrees * Math.PI) / 180);
+    ctx.drawImage(source, -srcW / 2, -srcH / 2, srcW, srcH);
+
+    if (source.close) source.close();
+
+    const dataUrl = canvas.toDataURL('image/jpeg', quality);
+    return { dataUrl, width: canvas.width, height: canvas.height };
   }
 
   function formatDateDisplay(raw) {
@@ -1834,6 +1876,7 @@
     uploadedFile = null;
     uploadedFileBase64 = null;
     generatedPdfBlob = null;
+    rotationDegrees = 0;
 
     document.getElementById('uploadZone').style.display = 'block';
     document.getElementById('previewContainer').style.display = 'none';
