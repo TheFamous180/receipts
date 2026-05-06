@@ -895,6 +895,15 @@
           </button>
         </div>
 
+        <div class="field-group">
+          <label class="field-label">Billable <span class="manual-tag">MANUAL</span></label>
+          <select id="fBillable" onchange="updateFilenamePreview()">
+            <option value="">-- Select --</option>
+            <option value="Billable">Billable</option>
+            <option value="NonBillable">Non-Billable</option>
+          </select>
+        </div>
+
         <div class="filename-preview">
           <div class="label">Generated Filename</div>
           <div class="value" id="filenamePreview">— fill in all fields above —</div>
@@ -1552,6 +1561,7 @@
   document.getElementById('fAccount').addEventListener('change', updateFilenamePreview);
   document.getElementById('fSubAccount').addEventListener('change', updateFilenamePreview);
   document.getElementById('fCard').addEventListener('change', updateFilenamePreview);
+  document.getElementById('fBillable').addEventListener('change', updateFilenamePreview);
   document.getElementById('fAccountCustom').addEventListener('input', updateFilenamePreview);
   document.getElementById('fSubAccountCustom').addEventListener('input', updateFilenamePreview);
   document.getElementById('fCardCustom').addEventListener('input', updateFilenamePreview);
@@ -1583,18 +1593,27 @@
     let subAccount = document.getElementById('fSubAccount').value;
     if (subAccount === '__custom__') subAccount = document.getElementById('fSubAccountCustom').value.trim();
 
-    return { vendor, card, amount, date, account, subAccount };
+    const billable = document.getElementById('fBillable').value;
+
+    return { vendor, card, amount, date, account, subAccount, billable };
+  }
+
+  // Converts MMDDYYYY → YYYYMMDD for filename ordering
+  function dateToYYYYMMDD(raw) {
+    if (!raw || raw.length !== 8) return raw;
+    const m = raw.slice(0, 2), d = raw.slice(2, 4), y = raw.slice(4);
+    return y + m + d;
   }
 
   function buildFilename(v) {
     const parts = [];
+    if (v.date) parts.push(dateToYYYYMMDD(v.date));
     if (v.vendor) parts.push(v.vendor);
     if (v.card) parts.push(v.card);
     if (v.amount) parts.push(v.amount);
-    if (v.date) parts.push(v.date);
-    // Account_Subaccount (e.g. Xerox_BL, Fisher_OneDevice)
-    if (v.account && v.subAccount) parts.push(`${v.account}_${v.subAccount}`);
-    else if (v.account) parts.push(v.account);
+    if (v.account) parts.push(v.account);
+    if (v.subAccount) parts.push(v.subAccount);
+    if (v.billable) parts.push(v.billable);
     return parts.join('_');
   }
 
@@ -1609,7 +1628,7 @@
       el.textContent = '— fill in all fields above —';
       el.className = 'value empty';
     }
-    const allFilled = v.vendor && v.card && v.amount && v.date && v.account && v.subAccount;
+    const allFilled = v.vendor && v.card && v.amount && v.date && v.account && v.subAccount && v.billable;
     document.getElementById('generateBtn').disabled = !allFilled || !uploadedFile;
   }
 
@@ -1639,6 +1658,7 @@
       ['Transaction Date', formatDateDisplay(v.date)],
       ['Account', v.account],
       ['Sub-Account', v.subAccount],
+      ['Billable', v.billable],
       ['Processed', new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })]
     ];
 
@@ -1897,6 +1917,7 @@
     document.getElementById('fAccountCustom').value = '';
     document.getElementById('fSubAccountCustom').style.display = 'none';
     document.getElementById('fSubAccountCustom').value = '';
+    document.getElementById('fBillable').value = '';
     populateSubAccountDropdown(null);
     applyTripMode(); // re-apply locked account/subaccount if Trip Mode is active
     document.getElementById('generateBtn').disabled = true;
