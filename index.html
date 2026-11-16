@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ExpensePilot</title>
-<!-- v2.2 (Nov 2026): reliability update + PDF receipts rendered into the record -->
+<!-- v2.3 (Nov 2026): one-step save, image safety net, settings backup, version/help, setup fixes -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap');
@@ -532,6 +532,8 @@
   }
 
   .btn-secondary:hover { border-color: var(--text); }
+  .btn-secondary:disabled { color: var(--muted); border-color: var(--border); cursor: not-allowed; opacity: 0.6; }
+  .two-col { align-content: start; }
 
   .btn-blue {
     background: rgba(71, 212, 255, 0.12);
@@ -753,6 +755,9 @@
         <p>Enter the last 5 digits of the credit card you'll use most often. You can add more cards later.</p>
         <input type="text" id="setupCard" maxlength="5" inputmode="numeric" placeholder="e.g. 12345" onkeydown="if(event.key==='Enter'){event.preventDefault();setupNextStep(1);}" />
         <button class="btn btn-primary" style="width:100%; padding:14px; margin-top:16px;" onclick="setupNextStep(1)">Next →</button>
+        <div style="text-align:center; margin-top:12px;">
+          <a href="#" onclick="event.preventDefault(); document.getElementById('settingsImportInput').click();" style="font-size:11px; color:var(--accent2);">Have a settings backup? Restore it instead</a>
+        </div>
       </div>
 
       <!-- Step 2: Accounts -->
@@ -932,8 +937,22 @@
         </div>
 
         <div class="actions" style="flex-direction:column; gap:8px;">
-          <button class="btn btn-primary" id="generateBtn" onclick="generatePDF()" disabled style="width:100%; padding:14px;">Generate PDF</button>
-          <button class="btn btn-blue" id="clearBtn" onclick="clearAll()" style="width:100%; padding:10px; font-size:11px;">✕ Start Over / Clear Form</button>
+          <button class="btn btn-primary save-btn" id="saveAsBtn" onclick="generateAndSave('picker')" disabled style="width:100%; padding:14px;">📁 Save PDF As... (choose location)</button>
+          <button class="btn btn-secondary save-btn" id="downloadBtn" onclick="generateAndSave('download')" disabled style="width:100%; padding:12px;">⬇ Quick Download</button>
+          <div style="font-size:10px; color:var(--muted); line-height:1.6; margin-top:2px;">
+            The PDF is built from the details above at the moment you save. On iPhone, files go to Downloads — tap Share → Dropbox (or Files) to move them.
+          </div>
+
+          <!-- Process Another prompt, hidden until save complete -->
+          <div id="processAnotherPanel" style="display:none; margin-top:10px; padding:16px; background:rgba(71,255,154,0.08); border:1px solid rgba(71,255,154,0.3); border-radius:8px;">
+            <div style="font-size:13px; margin-bottom:10px; color:var(--success);">✓ Receipt saved successfully</div>
+            <div style="font-size:11px; color:var(--muted); margin-bottom:12px;">Ready to process another receipt?</div>
+            <button class="btn btn-primary" style="width:100%; padding:14px;" onclick="startNewReceipt()">
+              ＋ Process Another Receipt
+            </button>
+          </div>
+
+          <button class="btn btn-blue" id="clearBtn" onclick="clearAll()" style="width:100%; padding:10px; font-size:11px; margin-top:6px;">✕ Start Over / Clear Form</button>
         </div>
       </div>
 
@@ -943,36 +962,25 @@
       </div>
     </div>
 
-    <!-- BOTTOM: Save Location -->
+    <!-- BOTTOM: Settings & Help (v2.3) -->
     <div class="panel full-col">
       <div class="panel-header">
-        <div class="step-num">3</div>
-        <div class="panel-label">Save PDF</div>
+        <div class="step-num">⚙</div>
+        <div class="panel-label">Your Settings &amp; Help</div>
       </div>
       <div class="dropbox-section">
         <div style="font-size:12px; color:var(--muted); margin-bottom:14px; line-height:1.6;">
-          Choose where to save the generated PDF. On desktop and Android, you'll get a folder picker. On iPhone, the file goes to your Downloads and you can then move it anywhere (including your Dropbox folder via the Files app).
+          Your cards, accounts and sub-accounts are saved <strong>only in this browser</strong>. Clearing browser data or switching devices removes them — keep a backup file and restore it on any device.
         </div>
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
-          <button class="btn btn-primary" style="flex:1; min-width:180px; padding:14px;" onclick="saveAsWithPicker()">
-            📁 Save As... (choose location)
-          </button>
-          <button class="btn btn-secondary" style="flex:1; min-width:180px; padding:14px;" onclick="saveToDownloads()">
-            ⬇ Quick Download
-          </button>
+          <button class="btn btn-secondary" style="flex:1; min-width:180px; padding:12px;" onclick="exportSettings()">⬇ Back Up Settings</button>
+          <button class="btn btn-secondary" style="flex:1; min-width:180px; padding:12px;" onclick="document.getElementById('settingsImportInput').click()">⬆ Restore Settings</button>
+          <input type="file" id="settingsImportInput" accept="application/json,.json" style="display:none;">
         </div>
-        <div style="font-size:10px; color:var(--muted); margin-top:10px; line-height:1.6;">
-          💡 <strong>Tip:</strong> On iPhone, to send directly to Dropbox — tap Share in the download notification → choose Dropbox from the share sheet.
+        <div id="iosHomeScreenTip" style="display:none; font-size:11px; color:var(--accent2); margin-top:12px; line-height:1.6;">
+          📱 <strong>iPhone tip:</strong> Safari can clear saved settings for sites you haven't visited in a while. Tap Share → <strong>Add to Home Screen</strong> and open ExpensePilot from that icon to keep your settings. The Home Screen app starts empty, so tap <strong>Back Up Settings</strong> here first, then <strong>Restore Settings</strong> in the Home Screen app.
         </div>
-
-        <!-- Process Another prompt, hidden until save complete -->
-        <div id="processAnotherPanel" style="display:none; margin-top:18px; padding:16px; background:rgba(71,255,154,0.08); border:1px solid rgba(71,255,154,0.3); border-radius:8px;">
-          <div style="font-size:13px; margin-bottom:10px; color:var(--success);">✓ Receipt saved successfully</div>
-          <div style="font-size:11px; color:var(--muted); margin-bottom:12px;">Ready to process another receipt?</div>
-          <button class="btn btn-primary" style="width:100%; padding:14px;" onclick="startNewReceipt()">
-            ＋ Process Another Receipt
-          </button>
-        </div>
+        <div id="appInfo" style="font-size:10px; color:var(--muted); margin-top:14px; line-height:1.6;"></div>
       </div>
     </div>
 
@@ -993,12 +1001,15 @@
   let uploadedFile = null;
   let uploadedFileBase64 = null;
   let rotationDegrees = 0; // 0, 90, 180, or 270
-  let generatedPdfBlob = null;
   let isConnectedToDropbox = false;
 
   // ── Set this to your Render backend URL after deploying ──────────────────
   // e.g. 'https://receipt-processor-api.onrender.com'
   const BACKEND_URL = 'https://expensepilot-api.msmooke82.workers.dev';
+
+  // ── App info (v2.3) ── shown at the bottom of the page and in the PDF footer
+  const APP_VERSION = '2.3';
+  const SUPPORT_CONTACT = ''; // e.g. 'Jane Doe (jane@company.com)' — leave empty for a generic message
 
   // ─── Upload Zone ───
   const uploadZone = document.getElementById('uploadZone');
@@ -1028,13 +1039,102 @@
     cameraInput.value = '';
   }
 
-  function handleFile(file) {
+  // ─── Upload safety net (v2.3) ───
+  // Makes sure every photo can actually be shown and embedded. iPhone HEIC photos
+  // opened in browsers that can't read HEIC (e.g. Chrome/Edge on Windows) are converted
+  // to JPEG first; anything still unreadable is rejected with a clear message instead
+  // of silently producing a record without the receipt image.
+  const HEIC2ANY_URL = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+  let heic2anyPromise = null;
+  let fileSeq = 0;
+
+  function isPdfFile(file) {
+    return file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+  }
+  function looksLikeHeic(file) {
+    return /image\/hei[cf]/i.test(file.type || '') || /\.hei[cf]$/i.test(file.name || '');
+  }
+
+  async function canDecodeImage(file) {
+    try {
+      const bmp = await createImageBitmap(file);
+      if (bmp.close) bmp.close();
+      return true;
+    } catch (e) { /* try the <img> route below */ }
+    return new Promise(resolve => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      const done = ok => { URL.revokeObjectURL(url); resolve(ok); };
+      const timer = setTimeout(() => done(false), 8000);
+      img.onload = () => { clearTimeout(timer); done(img.naturalWidth > 0); };
+      img.onerror = () => { clearTimeout(timer); done(false); };
+      img.src = url;
+    });
+  }
+
+  function loadHeic2any() {
+    if (!heic2anyPromise) {
+      heic2anyPromise = new Promise((resolve, reject) => {
+        if (window.heic2any) return resolve(window.heic2any);
+        const sc = document.createElement('script');
+        sc.src = HEIC2ANY_URL;
+        sc.onload = () => window.heic2any ? resolve(window.heic2any) : reject(new Error('converter missing'));
+        sc.onerror = () => reject(new Error('Could not load the HEIC converter'));
+        document.head.appendChild(sc);
+      }).catch(err => { heic2anyPromise = null; throw err; });
+    }
+    return heic2anyPromise;
+  }
+
+  async function convertHeicToJpeg(file) {
+    const heic2any = await loadHeic2any();
+    let out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 });
+    if (Array.isArray(out)) out = out[0];
+    const name = (file.name || 'receipt').replace(/\.[^.]+$/, '') + '.jpg';
+    return new File([out], name, { type: 'image/jpeg' });
+  }
+
+  function rejectUpload(message) {
+    resetToUpload();
+    const errEl = document.getElementById('errorSection');
+    errEl.textContent = message;
+    errEl.style.display = 'block';
+    setLeftStatus('error', 'Upload not accepted');
+    showToast('error', message);
+  }
+
+  async function handleFile(file) {
+    const mySeq = ++fileSeq;
+    if (!isPdfFile(file)) {
+      showAnalyzing(true);
+      document.getElementById('errorSection').style.display = 'none';
+      setLeftStatus('active', 'Checking photo...');
+      let usable = (await canDecodeImage(file)) ? file : null;
+      if (!usable && looksLikeHeic(file)) {
+        setLeftStatus('active', 'Converting iPhone photo (HEIC)...');
+        try { usable = await convertHeicToJpeg(file); }
+        catch (e) { console.warn('HEIC conversion failed', e); usable = null; }
+      }
+      if (mySeq !== fileSeq) return; // a newer file was chosen meanwhile
+      showAnalyzing(false);
+      if (!usable) {
+        rejectUpload(looksLikeHeic(file)
+          ? 'This iPhone photo (HEIC) could not be converted in this browser. Please upload a JPG/PNG, or open ExpensePilot on the iPhone and use Take Photo.'
+          : 'This file could not be opened as an image. Please upload a JPG, PNG or PDF receipt.');
+        return;
+      }
+      file = usable;
+    }
+    startWithFile(file);
+  }
+
+  function startWithFile(file) {
     uploadedFile = file;
     rotationDegrees = 0; // reset rotation for new upload
     const reader = new FileReader();
     reader.onload = e => {
       uploadedFileBase64 = e.target.result.split(',')[1];
-      const isPdf = file.type === 'application/pdf';
+      const isPdf = isPdfFile(file);
 
       if (isPdf) {
         document.getElementById('previewImg').style.display = 'none';
@@ -1088,10 +1188,8 @@
   // Shrinks phone photos (often 3–8 MB) before upload. Falls back to the original
   // file if the browser can't decode it (e.g. HEIC on Chrome) — the Worker handles that.
   async function prepareUpload(file, originalBase64) {
+    if (isPdfFile(file)) return { base64: originalBase64, mediaType: 'application/pdf' };
     const type = file.type || 'image/jpeg';
-    if (type === 'application/pdf' || !type.startsWith('image/')) {
-      return { base64: originalBase64, mediaType: type };
-    }
     try {
       const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
       const scale = Math.min(1, UPLOAD_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
@@ -1180,7 +1278,7 @@
       const hasWarnings = (data.warnings || []).length > 0;
       setLeftStatus(hasWarnings ? 'active' : 'success',
         hasWarnings ? 'Extraction complete — please check highlighted fields' : 'Extraction complete — review below');
-      setRightStatus('active', 'Edit fields, then generate PDF');
+      setRightStatus('active', 'Edit fields, then save the PDF');
 
     } catch (err) {
       if (mySeq !== extractionSeq) return;
@@ -1354,22 +1452,32 @@
         showToast('error', 'Add at least one account');
         return;
       }
-      // Build sub-account sections
+      // Build sub-account sections (v2.3: built as elements, so any name is safe)
       const container = document.getElementById('setupSubAccountSections');
       container.innerHTML = '';
+      setupSubEls.clear();
       setupState.accounts.forEach(acc => {
         setupState.subAccounts[acc] = setupState.subAccounts[acc] || [];
         const section = document.createElement('div');
         section.className = 'setup-subaccount-section';
-        section.innerHTML = `
-          <h4>${acc}</h4>
-          <div class="row">
-            <input type="text" id="setupSubInput_${acc}" placeholder="e.g. BL, NSP, OneDevice" onkeydown="if(event.key==='Enter'){event.preventDefault();addSetupSubAccount('${acc}');}" />
-            <button class="btn btn-primary" onclick="addSetupSubAccount('${acc}')">Add</button>
-          </div>
-          <div id="setupSubList_${acc}"></div>
-        `;
+        const h4 = document.createElement('h4');
+        h4.textContent = acc;
+        const row = document.createElement('div');
+        row.className = 'row';
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = 'e.g. BL, NSP, OneDevice';
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addSetupSubAccount(acc); } });
+        const btn = document.createElement('button');
+        btn.className = 'btn btn-primary';
+        btn.textContent = 'Add';
+        btn.addEventListener('click', () => addSetupSubAccount(acc));
+        const list = document.createElement('div');
+        row.append(input, btn);
+        section.append(h4, row, list);
         container.appendChild(section);
+        setupSubEls.set(acc, { input, list });
+        renderSetupSubList(acc);
       });
       document.getElementById('setupStep2').style.display = 'none';
       document.getElementById('setupStep3').style.display = 'block';
@@ -1398,15 +1506,30 @@
     document.getElementById('setupStep2Next').disabled = setupState.accounts.length === 0;
   }
 
+  // Creates a removable tag element; text is inserted as plain text (never as HTML)
+  function makeSetupTag(text, onRemove) {
+    const tag = document.createElement('span');
+    tag.className = 'setup-tag';
+    tag.append(document.createTextNode(text + ' '));
+    const x = document.createElement('span');
+    x.className = 'setup-tag-remove';
+    x.textContent = '✕';
+    x.addEventListener('click', onRemove);
+    tag.appendChild(x);
+    return tag;
+  }
+
+  const setupSubEls = new Map(); // account -> { input, list }
+
   function renderSetupAccountList() {
     const list = document.getElementById('setupAccountList');
-    list.innerHTML = setupState.accounts.map(a =>
-      `<span class="setup-tag">${a} <span class="setup-tag-remove" onclick="removeSetupAccount('${a}')">✕</span></span>`
-    ).join('');
+    list.replaceChildren(...setupState.accounts.map(a => makeSetupTag(a, () => removeSetupAccount(a))));
   }
 
   function addSetupSubAccount(account) {
-    const input = document.getElementById(`setupSubInput_${account}`);
+    const els = setupSubEls.get(account);
+    if (!els) return;
+    const input = els.input;
     const name = input.value.trim();
     if (!name) return;
     if (setupState.subAccounts[account].includes(name)) {
@@ -1425,10 +1548,9 @@
   }
 
   function renderSetupSubList(account) {
-    const list = document.getElementById(`setupSubList_${account}`);
-    list.innerHTML = setupState.subAccounts[account].map(s =>
-      `<span class="setup-tag">${s} <span class="setup-tag-remove" onclick="removeSetupSubAccount('${account}','${s}')">✕</span></span>`
-    ).join('');
+    const els = setupSubEls.get(account);
+    if (!els) return;
+    els.list.replaceChildren(...setupState.subAccounts[account].map(s => makeSetupTag(s, () => removeSetupSubAccount(account, s))));
   }
 
   function finishSetup() {
@@ -1658,7 +1780,7 @@
     const validSub = sub && sub !== '__custom__';
     if (!tripMode.active && validAcc && validSub) {
       btn.style.display = 'block';
-      btn.innerHTML = `✈️ Lock ${acc}_${sub} for Trip Mode`;
+      btn.textContent = `✈️ Lock ${acc}_${sub} for Trip Mode`;
     } else {
       btn.style.display = 'none';
     }
@@ -1784,7 +1906,7 @@
     }
     const allFilled = v.vendor && v.card && v.amount && v.date && v.account && v.subAccount && v.billable;
     const valid = validateFields();
-    document.getElementById('generateBtn').disabled = !allFilled || !valid || !uploadedFile;
+    setSaveButtonsEnabled(!!(allFilled && valid && uploadedFile));
   }
 
   // ─── PDF receipt rendering (v2.2) ───
@@ -1859,13 +1981,13 @@
         : 'PDF preview unavailable — the record will be generated without the receipt pages. Send the original PDF to accounting too.';
       msg.style.color = 'var(--error)';
     });
-    promise.catch(() => {}); // handled above / in generatePDF
+    promise.catch(() => {}); // handled above / in buildReceiptPdf
   }
 
   // ─── PDF Generation ───
-  async function generatePDF() {
-    normalizeAmountField();
-    if (!validateFields()) { showToast('error', '⚠ Fix the highlighted fields first.'); return; }
+  // Builds the receipt record from the CURRENT field values. Called on every save,
+  // so the saved file always matches what is on screen (v2.3).
+  async function buildReceiptPdf() {
     const v = getFieldValues();
     const filename = buildFilename(v) + '.pdf';
     const { jsPDF } = window.jspdf;
@@ -1912,15 +2034,14 @@
     let receiptPages = [];   // [{ dataUrl, width, height }]
     let pdfTotalPages = 0;
     let pdfRenderFailed = false;
-    const isPdfUpload = uploadedFile && uploadedFile.type === 'application/pdf';
+    let imageFailed = false;
+    const isPdfUpload = uploadedFile && isPdfFile(uploadedFile);
 
-    const genBtn = document.getElementById('generateBtn');
-    genBtn.disabled = true;
     setRightStatus('active', isPdfUpload ? 'Building PDF — rendering receipt pages...' : 'Building PDF...');
 
-    if (uploadedFile && uploadedFile.type.startsWith('image/')) {
+    if (uploadedFile && !isPdfUpload) {
       try { receiptPages = [await compressImage(uploadedFile)]; }
-      catch (e) { console.warn('Image embed failed', e); }
+      catch (e) { console.warn('Image embed failed', e); imageFailed = true; }
     } else if (isPdfUpload) {
       try {
         const rendered = await (pdfRenderPromise || renderPdfPages(uploadedFile));
@@ -1962,7 +2083,7 @@
       doc.setTextColor(150, 150, 150);
       doc.setFontSize(7);
       doc.setFont('helvetica', 'normal');
-      doc.text('Generated by Receipt Processor · ' + new Date().toISOString(), 10, 276);
+      doc.text(`Generated by ExpensePilot v${APP_VERSION} · ` + new Date().toISOString(), 10, 276);
     }
 
     // Page 1: first receipt page goes under the details, exactly like a photo receipt
@@ -1970,13 +2091,13 @@
       const imgY = y + 6;
       drawLabel(receiptLabel(0), imgY);
       try { drawFittedImage(receiptPages[0], imgY + 4); } catch (e) { console.warn('Embed failed', e); }
-    } else if (pdfRenderFailed) {
+    } else if (pdfRenderFailed || imageFailed) {
       doc.setTextColor(200, 40, 40);
       doc.setFontSize(9);
       doc.setFont('helvetica', 'bold');
-      doc.text('Receipt PDF could not be rendered into this record.', 10, y + 10);
+      doc.text(pdfRenderFailed ? 'Receipt PDF could not be rendered into this record.' : 'Receipt image could not be included in this record.', 10, y + 10);
       doc.setFont('helvetica', 'normal');
-      doc.text('Please send the original PDF receipt to accounting together with this file.', 10, y + 16);
+      doc.text('Please send the original receipt file to accounting together with this file.', 10, y + 16);
     }
     drawFooter();
 
@@ -2002,16 +2123,8 @@
       drawFooter();
     }
 
-    genBtn.disabled = false;
-    if (pdfRenderFailed) {
-      showToast('error', '⚠ PDF ready, but the receipt pages could not be included — send the original PDF too.');
-    }
 
-    generatedPdfBlob = doc.output('blob');
-
-    const sizeKb = (generatedPdfBlob.size / 1024).toFixed(0);
-    if (!pdfRenderFailed) showToast('success', `✓ PDF ready (${sizeKb} KB) — use Save buttons below`);
-    setRightStatus('success', `PDF ready · ${filename} · ${sizeKb} KB`);
+    return { blob: doc.output('blob'), filename, missingReceipt: pdfRenderFailed || imageFailed };
   }
 
   // ─── Image Compression ───
@@ -2104,66 +2217,84 @@
   }
 
   // ─── Save Functions ───
-  function getCurrentFilename() {
+  // ─── Generate & Save in one step (v2.3) ───
+  // The PDF is rebuilt from the current fields on every save, so an edit made
+  // after an earlier save can never produce a file whose contents don't match its name.
+  let saveInProgress = false;
+
+  function setSaveButtonsEnabled(enabled) {
+    ['saveAsBtn', 'downloadBtn'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.disabled = !enabled || saveInProgress;
+    });
+  }
+
+  async function generateAndSave(mode) {
+    if (saveInProgress) return;
+    normalizeAmountField();
+    if (!validateFields()) { showToast('error', '⚠ Fix the highlighted fields first.'); return; }
     const v = getFieldValues();
-    return buildFilename(v) + '.pdf';
-  }
-
-  // "Save As..." — uses File System Access API where supported (Chrome/Edge desktop, Android Chrome)
-  // Falls back to a regular download if not supported (iOS Safari, Firefox)
-  async function saveAsWithPicker() {
-    if (!generatedPdfBlob) {
-      showToast('error', '⚠ Generate the PDF first.');
+    if (!(v.vendor && v.card && v.amount && v.date && v.account && v.subAccount && v.billable && uploadedFile)) {
+      showToast('error', '⚠ Fill in all fields first.');
       return;
     }
-    const filename = getCurrentFilename();
+    const suggestedName = buildFilename(v) + '.pdf';
 
-    // Check for File System Access API support
-    if ('showSaveFilePicker' in window) {
+    // The folder picker must open immediately after the click (browser security rule),
+    // so ask for the location first, then build the PDF.
+    let handle = null;
+    const usePicker = mode === 'picker' && 'showSaveFilePicker' in window;
+    if (usePicker) {
       try {
-        const handle = await window.showSaveFilePicker({
-          suggestedName: filename,
-          types: [{
-            description: 'PDF file',
-            accept: { 'application/pdf': ['.pdf'] }
-          }]
+        handle = await window.showSaveFilePicker({
+          suggestedName,
+          types: [{ description: 'PDF file', accept: { 'application/pdf': ['.pdf'] } }]
         });
-        const writable = await handle.createWritable();
-        await writable.write(generatedPdfBlob);
-        await writable.close();
-        showToast('success', '✓ Saved: ' + handle.name);
-        setRightStatus('success', 'Saved · ' + handle.name);
-        showProcessAnotherPrompt();
       } catch (err) {
-        if (err.name !== 'AbortError') {
-          showToast('error', '✗ Save failed: ' + err.message);
-        }
+        if (err.name === 'AbortError') return; // user cancelled
+        console.warn('Save picker unavailable, falling back to download', err);
       }
-    } else {
-      // Fallback for browsers without File System Access API (iOS Safari, Firefox)
-      showToast('active', '📁 Your browser will save to Downloads — move from there to your chosen location');
-      setTimeout(() => saveToDownloads(), 800);
+    } else if (mode === 'picker') {
+      showToast('active', '📁 Your browser will save to Downloads — move it from there to your chosen location');
     }
-  }
 
-  // Quick download to default Downloads folder
-  function saveToDownloads() {
-    if (!generatedPdfBlob) {
-      showToast('error', '⚠ Generate the PDF first.');
-      return;
+    saveInProgress = true;
+    setSaveButtonsEnabled(false);
+    try {
+      const { blob, filename, missingReceipt } = await buildReceiptPdf();
+      const sizeKb = (blob.size / 1024).toFixed(0);
+
+      if (handle) {
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        setRightStatus('success', `Saved · ${handle.name} · ${sizeKb} KB`);
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setRightStatus('success', `Downloaded · ${filename} · ${sizeKb} KB`);
+      }
+
+      if (missingReceipt) {
+        showToast('error', '⚠ Saved, but the receipt image could not be included — send the original receipt file to accounting too.');
+      } else {
+        showToast('success', '✓ Saved: ' + (handle ? handle.name : filename));
+      }
+      showProcessAnotherPrompt();
+    } catch (err) {
+      console.error('Save failed', err);
+      showToast('error', '✗ Could not create or save the PDF: ' + (err && err.message ? err.message : err));
+      setRightStatus('error', 'Save failed — please try again');
+    } finally {
+      saveInProgress = false;
+      updateFilenamePreview(); // re-enables the buttons if fields are complete
     }
-    const filename = getCurrentFilename();
-    const url = URL.createObjectURL(generatedPdfBlob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast('success', '✓ Downloaded: ' + filename);
-    setRightStatus('success', 'Downloaded · ' + filename);
-    showProcessAnotherPrompt();
   }
 
   function showProcessAnotherPrompt() {
@@ -2188,7 +2319,6 @@
     pdfRenderPromise = null;
     uploadedFile = null;
     uploadedFileBase64 = null;
-    generatedPdfBlob = null;
     rotationDegrees = 0;
 
     document.getElementById('uploadZone').style.display = 'block';
@@ -2213,7 +2343,7 @@
     document.getElementById('fBillable').value = '';
     populateSubAccountDropdown(null);
     applyTripMode(); // re-apply locked account/subaccount if Trip Mode is active
-    document.getElementById('generateBtn').disabled = true;
+    setSaveButtonsEnabled(false);
     const panel = document.getElementById('processAnotherPanel');
     if (panel) panel.style.display = 'none';
 
@@ -2222,10 +2352,102 @@
     updateFilenamePreview();
   }
 
+  // ─── Settings backup / restore (v2.3) ───
+  // Cards, accounts and sub-accounts live only in this browser's storage.
+  // These let users keep a backup file and restore it on any device or browser.
+  function exportSettings() {
+    const data = {
+      app: 'ExpensePilot',
+      type: 'settings',
+      formatVersion: 1,
+      appVersion: APP_VERSION,
+      exportedAt: new Date().toISOString(),
+      cards: stored.cards || [],
+      accounts: stored.accounts || [],
+      subAccounts: stored.subAccounts || {},
+      tripMode: tripMode
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const d = new Date();
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `ExpensePilot-settings-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('success', '✓ Settings backup downloaded — keep it somewhere safe (e.g. OneDrive/Dropbox)');
+  }
+
+  function isStringArray(x) { return Array.isArray(x) && x.every(v => typeof v === 'string'); }
+
+  function parseSettingsFile(text) {
+    const d = JSON.parse(text);
+    if (!d || d.app !== 'ExpensePilot' || d.type !== 'settings') throw new Error('This is not an ExpensePilot settings file.');
+    if (!isStringArray(d.cards) || !isStringArray(d.accounts)) throw new Error('The settings file is incomplete or damaged.');
+    const subAccounts = {};
+    Object.entries(d.subAccounts || {}).forEach(([acc, subs]) => {
+      if (typeof acc === 'string' && isStringArray(subs)) subAccounts[acc] = subs;
+    });
+    const cards = d.cards.map(c => c.trim()).filter(c => /^\d{4,5}$/.test(c));
+    const accounts = d.accounts.map(a => a.trim()).filter(Boolean);
+    accounts.forEach(a => { if (!subAccounts[a]) subAccounts[a] = []; });
+    let trip = { active: false, account: '', subAccount: '' };
+    if (d.tripMode && d.tripMode.active && accounts.includes(d.tripMode.account) &&
+        (subAccounts[d.tripMode.account] || []).includes(d.tripMode.subAccount)) {
+      trip = { active: true, account: d.tripMode.account, subAccount: d.tripMode.subAccount };
+    }
+    return { cards, accounts, subAccounts, trip };
+  }
+
+  document.getElementById('settingsImportInput').addEventListener('change', async e => {
+    const input = e.target;
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    try {
+      const parsed = parseSettingsFile(await file.text());
+      const hasExisting = (stored.cards || []).length > 0 || (stored.accounts || []).length > 0;
+      if (hasExisting && !confirm(`Replace your current settings with this backup?\n\nBackup contains ${parsed.cards.length} card(s) and ${parsed.accounts.length} account(s).`)) return;
+      stored = { cards: parsed.cards, accounts: parsed.accounts, subAccounts: parsed.subAccounts };
+      saveStoredData(stored);
+      localStorage.setItem(MIGRATION_KEY, 'done');
+      tripMode = parsed.trip;
+      saveTripMode();
+      populateAccountDropdown();
+      populateCardDropdown();
+      populateSubAccountDropdown(document.getElementById('fAccount').value || null);
+      renderTripModeBanner();
+      document.getElementById('setupModal').style.display = 'none';
+      showToast('success', `✓ Settings restored — ${parsed.cards.length} card(s), ${parsed.accounts.length} account(s)`);
+    } catch (err) {
+      showToast('error', '✗ Could not restore settings: ' + (err instanceof SyntaxError ? 'the file is not valid.' : err.message));
+    }
+  });
+
+  // App info line + iPhone Home Screen tip + ask the browser to keep our storage
+  (function initAppInfo() {
+    const info = document.getElementById('appInfo');
+    if (info) {
+      info.textContent = `ExpensePilot v${APP_VERSION} · ` + (SUPPORT_CONTACT
+        ? `Questions or problems? Contact ${SUPPORT_CONTACT}.`
+        : 'Questions or problems? Contact your ExpensePilot administrator.') +
+        ' If you see an error, include its reference number.';
+    }
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const standalone = navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+    if (isIOS && !standalone) document.getElementById('iosHomeScreenTip').style.display = 'block';
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  })();
+
   // ─── Toast ───
   function showToast(type, msg) {
     const t = document.getElementById('toast');
     document.getElementById('toastMsg').textContent = msg;
+    document.getElementById('toastIcon').textContent = type === 'error' ? '!' : (type === 'success' ? '✓' : 'i');
     t.className = `toast ${type} show`;
     setTimeout(() => t.classList.remove('show'), 4000);
   }
