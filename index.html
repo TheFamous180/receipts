@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ExpensePilot</title>
+<!-- v2 (Nov 2026): reliability update — see change notes -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap');
@@ -712,6 +713,24 @@
 
   .error-section strong { color: #ff6b6b; }
   .error-section code { background: rgba(255,255,255,0.08); padding: 1px 5px; border-radius: 3px; font-size: 10px; }
+
+  /* v2: extraction warnings + field validation */
+  .warn-section {
+    margin: 0 20px 20px;
+    padding: 12px 14px;
+    background: rgba(255,184,71,0.08);
+    border: 1px solid rgba(255,184,71,0.35);
+    border-radius: 6px;
+    font-size: 11px;
+    color: #ffb847;
+    line-height: 1.7;
+    display: none;
+  }
+  .warn-section ul { margin: 4px 0 0 16px; }
+  input.needs-check { border-color: #ffb847; }
+  input.invalid { border-color: var(--error); }
+  .field-hint { font-size: 10px; color: var(--error); margin-top: 4px; min-height: 0; }
+  .field-hint:empty { display: none; }
 </style>
 </head>
 <body>
@@ -825,6 +844,7 @@
       </div>
 
       <div id="errorSection" class="error-section"></div>
+      <div id="warnSection" class="warn-section"></div>
 
       <button id="replaceBtn" class="replace-btn" style="display:none;" onclick="resetToUpload()">↑ Replace Receipt</button>
 
@@ -865,12 +885,14 @@
           <div class="field-group">
             <label class="field-label">Amount <span class="auto-tag">AUTO</span></label>
             <input type="text" id="fAmount" placeholder="e.g. $77.21" />
+            <div class="field-hint" id="hintAmount"></div>
           </div>
         </div>
 
         <div class="field-group">
           <label class="field-label">Date <span class="auto-tag">AUTO</span></label>
-          <input type="text" id="fDate" placeholder="e.g. 01192026 (MMDDYYYY)" maxlength="8" />
+          <input type="text" id="fDate" placeholder="e.g. 01192026 (MMDDYYYY)" maxlength="8" inputmode="numeric" />
+          <div class="field-hint" id="hintDate"></div>
         </div>
 
         <div class="field-group">
@@ -994,12 +1016,13 @@
   cameraInput.addEventListener('change', () => { if (cameraInput.files[0]) handleFile(cameraInput.files[0]); });
 
   function resetToUpload() {
+    extractionSeq++; // ignore any in-flight extraction
     rotationDegrees = 0;
     document.getElementById('uploadZone').style.display = 'block';
     document.getElementById('previewContainer').style.display = 'none';
     document.getElementById('replaceBtn').style.display = 'none';
     document.getElementById('analyzingState').style.display = 'none';
-    document.getElementById('errorSection').style.display = 'none';
+    document.getElementById('errorSection').style.display = 'none'; document.getElementById('warnSection').style.display = 'none';
     fileInput.value = '';
     cameraInput.value = '';
   }
@@ -1028,7 +1051,7 @@
       document.getElementById('uploadZone').style.display = 'none';
       document.getElementById('previewContainer').style.display = 'block';
       document.getElementById('replaceBtn').style.display = 'block';
-      document.getElementById('errorSection').style.display = 'none';
+      document.getElementById('errorSection').style.display = 'none'; document.getElementById('warnSection').style.display = 'none';
 
       setLeftStatus('active', 'Analyzing receipt...');
       showAnalyzing(true);
@@ -1053,52 +1076,132 @@
     el.innerHTML = `<div class="dot"></div><span>${msg}</span>`;
   }
 
-  // ─── AI Extraction ───
-  async function extractReceiptData(file) {
-    const isPdf = file.type === 'application/pdf';
-    const mediaType = isPdf ? 'application/pdf' : (file.type || 'image/jpeg');
+  // ─── AI Extraction (v2: downscale, timeout, retry, warnings) ───
+  const EXTRACT_TIMEOUT_MS = 75000;   // Worker retries internally; typical response is 3–8s
+  const UPLOAD_MAX_EDGE = 2000;       // px — plenty for OCR, far smaller than raw phone photos
+  const UPLOAD_JPEG_QUALITY = 0.85;
+  let extractionSeq = 0;              // guards against a slow old response overwriting a newer receipt
 
-    // Detect placeholder URL
-    if (!BACKEND_URL || BACKEND_URL === 'YOUR_RENDER_URL_HERE') {
-      showExtractionError('Backend URL not configured. Open the HTML file and set <code>BACKEND_URL</code> to your Render deployment URL, then re-upload to GitHub Pages.');
-      return;
+  // Shrinks phone photos (often 3–8 MB) before upload. Falls back to the original
+  // file if the browser can't decode it (e.g. HEIC on Chrome) — the Worker handles that.
+  async function prepareUpload(file, originalBase64) {
+    const type = file.type || 'image/jpeg';
+    if (type === 'application/pdf' || !type.startsWith('image/')) {
+      return { base64: originalBase64, mediaType: type };
     }
+    try {
+      const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+      const scale = Math.min(1, UPLOAD_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(bitmap.width * scale);
+      canvas.height = Math.round(bitmap.height * scale);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      if (bitmap.close) bitmap.close();
+      const dataUrl = canvas.toDataURL('image/jpeg', UPLOAD_JPEG_QUALITY);
+      const base64 = dataUrl.split(',')[1];
+      // Only use the resized version if it's actually smaller
+      if (base64 && base64.length < originalBase64.length) {
+        return { base64, mediaType: 'image/jpeg' };
+      }
+    } catch (e) {
+      console.warn('Resize skipped, sending original:', e);
+    }
+    return { base64: originalBase64, mediaType: type };
+  }
 
+  async function postExtract(payload) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), EXTRACT_TIMEOUT_MS);
     try {
       const res = await fetch(`${BACKEND_URL}/extract`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: uploadedFileBase64, mediaType })
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
+      const data = await res.json().catch(() => ({}));
+      return { res, data };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData?.error || `Server error ${res.status}`);
+  async function extractReceiptData(file) {
+    const mySeq = ++extractionSeq;
+
+    if (!BACKEND_URL || BACKEND_URL === 'YOUR_RENDER_URL_HERE') {
+      showExtractionError('Backend URL not configured. Set <code>BACKEND_URL</code> in index.html.');
+      return;
+    }
+
+    try {
+      const payload = await prepareUpload(file, uploadedFileBase64);
+      payload.imageBase64 = payload.base64; delete payload.base64;
+
+      // One client-side retry for dropped connections / timeouts only.
+      // (The Worker already retries rate limits and AI errors itself.)
+      let result;
+      try {
+        result = await postExtract(payload);
+      } catch (netErr) {
+        if (mySeq !== extractionSeq) return;
+        setLeftStatus('active', 'Connection hiccup — retrying...');
+        await new Promise(r => setTimeout(r, 2000));
+        result = await postExtract(payload);
       }
+      if (mySeq !== extractionSeq) return; // user replaced the receipt meanwhile
 
-      const parsed = await res.json();
+      const { res, data } = result;
+      if (!res.ok) {
+        const ref = data?.requestId ? ` (ref ${escapeHtml(data.requestId)})` : '';
+        const msg = data?.error ? escapeHtml(data.error) : `Server error ${res.status}`;
+        showExtractionError(`✗ ${msg}${ref}`);
+        return;
+      }
 
       showAnalyzing(false);
       document.getElementById('waitingState').style.display = 'none';
       document.getElementById('formBody').style.display = 'block';
 
-      document.getElementById('fVendor').value = parsed.vendor || '';
-      document.getElementById('fAmount').value = parsed.amount || '';
-      document.getElementById('fDate').value = parsed.date || '';
+      document.getElementById('fVendor').value = data.vendor || '';
+      document.getElementById('fAmount').value = data.amount || '';
+      document.getElementById('fDate').value = data.date || '';
 
       applyTripMode(); // auto-fill account/subaccount if Trip Mode is active
 
+      showExtractionWarnings(data.warnings || []);
       updateFilenamePreview();
-      setLeftStatus('success', 'Extraction complete — review below');
+      const hasWarnings = (data.warnings || []).length > 0;
+      setLeftStatus(hasWarnings ? 'active' : 'success',
+        hasWarnings ? 'Extraction complete — please check highlighted fields' : 'Extraction complete — review below');
       setRightStatus('active', 'Edit fields, then generate PDF');
 
-      ['fVendor','fAmount','fDate'].forEach(id => {
-        document.getElementById(id).addEventListener('input', updateFilenamePreview);
-      });
-
     } catch (err) {
-      showExtractionError(`✗ Extraction failed — ${err.message}<br><br>Check your internet connection, or fill in the fields manually below.`);
+      if (mySeq !== extractionSeq) return;
+      const timedOut = err && err.name === 'AbortError';
+      showExtractionError(timedOut
+        ? '✗ The receipt reader took too long to respond. Please try again, or fill in the fields manually below.'
+        : '✗ Could not reach the receipt reader. Check your internet connection, or fill in the fields manually below.');
     }
+  }
+
+  function showExtractionWarnings(warnings) {
+    const box = document.getElementById('warnSection');
+    const fieldMap = { vendor: 'fVendor', amount: 'fAmount', date: 'fDate' };
+    Object.values(fieldMap).forEach(id => document.getElementById(id).classList.remove('needs-check'));
+    if (!warnings.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.innerHTML = '<strong>Please double-check:</strong><ul></ul>';
+    const ul = box.querySelector('ul');
+    warnings.forEach(w => {
+      const li = document.createElement('li');
+      li.textContent = w.message;
+      ul.appendChild(li);
+      if (fieldMap[w.field]) document.getElementById(fieldMap[w.field]).classList.add('needs-check');
+    });
+    box.style.display = 'block';
   }
 
   function showExtractionError(msg) {
@@ -1108,10 +1211,58 @@
     const errEl = document.getElementById('errorSection');
     errEl.style.display = 'block';
     errEl.innerHTML = msg;
+    document.getElementById('warnSection').style.display = 'none';
     setLeftStatus('error', 'Extraction failed — fill in manually');
-    ['fVendor','fAmount','fDate'].forEach(id => {
-      document.getElementById(id).addEventListener('input', updateFilenamePreview);
-    });
+    updateFilenamePreview();
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  // Register field listeners once (v1 re-added them on every receipt)
+  ['fVendor','fAmount','fDate'].forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('input', () => { el.classList.remove('needs-check'); updateFilenamePreview(); });
+  });
+  document.getElementById('fAmount').addEventListener('blur', normalizeAmountField);
+
+  // ─── Field validation ───
+  function parseAmountValue(raw) {
+    const s = String(raw || '').replace(/[$,\s]/g, '');
+    if (!/^\d{1,7}(\.\d{1,2})?$/.test(s)) return null;
+    return parseFloat(s);
+  }
+
+  function normalizeAmountField() {
+    const el = document.getElementById('fAmount');
+    const n = parseAmountValue(el.value);
+    if (n !== null) el.value = '$' + n.toFixed(2);
+    updateFilenamePreview();
+  }
+
+  function isValidMMDDYYYY(s) {
+    if (!/^\d{8}$/.test(s)) return false;
+    const m = +s.slice(0, 2), d = +s.slice(2, 4), y = +s.slice(4);
+    const dt = new Date(y, m - 1, d);
+    return y >= 2000 && y <= 2100 && dt.getFullYear() === y && dt.getMonth() === m - 1 && dt.getDate() === d;
+  }
+
+  // Returns true if amount & date are valid; shows inline hints otherwise
+  function validateFields() {
+    const amountEl = document.getElementById('fAmount');
+    const dateEl = document.getElementById('fDate');
+    const amount = amountEl.value.trim();
+    const date = dateEl.value.trim();
+
+    const amountOk = !amount || /^\$\d{1,7}\.\d{2}$/.test(amount) || parseAmountValue(amount) !== null;
+    const dateOk = !date || isValidMMDDYYYY(date);
+
+    amountEl.classList.toggle('invalid', !amountOk);
+    dateEl.classList.toggle('invalid', !dateOk);
+    document.getElementById('hintAmount').textContent = amountOk ? '' : 'Use a number like $77.21';
+    document.getElementById('hintDate').textContent = dateOk ? '' : 'Use a real date as MMDDYYYY, e.g. 01192026';
+    return amountOk && dateOk;
   }
 
   // ─── Accounts / Sub-Accounts / Cards (with localStorage persistence) ───
@@ -1629,11 +1780,14 @@
       el.className = 'value empty';
     }
     const allFilled = v.vendor && v.card && v.amount && v.date && v.account && v.subAccount && v.billable;
-    document.getElementById('generateBtn').disabled = !allFilled || !uploadedFile;
+    const valid = validateFields();
+    document.getElementById('generateBtn').disabled = !allFilled || !valid || !uploadedFile;
   }
 
   // ─── PDF Generation ───
   async function generatePDF() {
+    normalizeAmountField();
+    if (!validateFields()) { showToast('error', '⚠ Fix the highlighted fields first.'); return; }
     const v = getFieldValues();
     const filename = buildFilename(v) + '.pdf';
     const { jsPDF } = window.jspdf;
@@ -1893,6 +2047,7 @@
 
   // ─── Clear ───
   function clearAll() {
+    extractionSeq++; // ignore any in-flight extraction
     uploadedFile = null;
     uploadedFileBase64 = null;
     generatedPdfBlob = null;
@@ -1903,12 +2058,12 @@
     document.getElementById('replaceBtn').style.display = 'none';
     document.getElementById('formBody').style.display = 'none';
     document.getElementById('waitingState').style.display = 'block';
-    document.getElementById('errorSection').style.display = 'none';
+    document.getElementById('errorSection').style.display = 'none'; document.getElementById('warnSection').style.display = 'none';
     document.getElementById('analyzingState').style.display = 'none';
     fileInput.value = '';
     cameraInput.value = '';
 
-    ['fVendor','fAmount','fDate'].forEach(id => document.getElementById(id).value = '');
+    ['fVendor','fAmount','fDate'].forEach(id => { const el = document.getElementById(id); el.value = ''; el.classList.remove('needs-check', 'invalid'); });
     document.getElementById('fCard').value = stored.cards[0] || '';
     document.getElementById('fCardCustom').style.display = 'none';
     document.getElementById('fCardCustom').value = '';
