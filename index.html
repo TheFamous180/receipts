@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ExpensePilot</title>
-<!-- v2 (Nov 2026): reliability update — see change notes -->
+<!-- v2.2 (Nov 2026): reliability update + PDF receipts rendered into the record -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap');
@@ -1017,6 +1017,7 @@
 
   function resetToUpload() {
     extractionSeq++; // ignore any in-flight extraction
+    pdfRenderPromise = null;
     rotationDegrees = 0;
     document.getElementById('uploadZone').style.display = 'block';
     document.getElementById('previewContainer').style.display = 'none';
@@ -1039,7 +1040,9 @@
         document.getElementById('previewImg').style.display = 'none';
         document.getElementById('pdfPreviewMsg').style.display = 'block';
         document.getElementById('rotateBtn').style.display = 'none';
+        startPdfPreview(file);
       } else {
+        pdfRenderPromise = null;
         const img = document.getElementById('previewImg');
         img.src = e.target.result;
         img.style.display = 'block';
@@ -1784,6 +1787,81 @@
     document.getElementById('generateBtn').disabled = !allFilled || !valid || !uploadedFile;
   }
 
+  // ─── PDF receipt rendering (v2.2) ───
+  // pdf.js is loaded only when someone uploads a PDF, so photo users pay nothing extra.
+  // Legacy build = broadest browser support (older iPhones/Safari).
+  const PDFJS_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/legacy/build/';
+  const PDF_MAX_PAGES = 10;          // pages embedded into the receipt record
+  let pdfjsLibPromise = null;
+  let pdfRenderPromise = null;       // rendering of the currently uploaded PDF
+
+  function loadPdfJs() {
+    if (!pdfjsLibPromise) {
+      pdfjsLibPromise = import(PDFJS_BASE + 'pdf.min.mjs')
+        .then(lib => { lib.GlobalWorkerOptions.workerSrc = PDFJS_BASE + 'pdf.worker.min.mjs'; return lib; })
+        .catch(err => { pdfjsLibPromise = null; throw err; }); // allow a retry later
+    }
+    return pdfjsLibPromise;
+  }
+
+  // Renders up to PDF_MAX_PAGES pages to JPEG images (same format as photo receipts).
+  async function renderPdfPages(file) {
+    const lib = await loadPdfJs();
+    const data = new Uint8Array(await file.arrayBuffer());
+    const pdf = await lib.getDocument({ data, isEvalSupported: false }).promise;
+    try {
+      const total = pdf.numPages;
+      const count = Math.min(total, PDF_MAX_PAGES);
+      const pages = [];
+      for (let i = 1; i <= count; i++) {
+        const page = await pdf.getPage(i);
+        const base = page.getViewport({ scale: 1 });
+        const scale = Math.min(1600 / Math.max(base.width, base.height), 3); // ~1600px longest edge
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        pages.push({ dataUrl: canvas.toDataURL('image/jpeg', 0.8), width: canvas.width, height: canvas.height });
+        page.cleanup();
+      }
+      return { pages, total };
+    } finally {
+      pdf.destroy();
+    }
+  }
+
+  // Starts rendering as soon as a PDF is uploaded and shows page 1 as the preview
+  function startPdfPreview(file) {
+    const msg = document.getElementById('pdfPreviewMsg');
+    const img = document.getElementById('previewImg');
+    msg.textContent = 'Loading PDF preview...';
+    msg.style.color = '';
+    const promise = renderPdfPages(file);
+    pdfRenderPromise = promise;
+    promise.then(({ pages, total }) => {
+      if (pdfRenderPromise !== promise) return; // a different receipt was uploaded since
+      img.src = pages[0].dataUrl;
+      img.style.display = 'block';
+      img.style.transform = '';
+      msg.textContent = total > 1
+        ? `PDF · ${total} pages${total > PDF_MAX_PAGES ? ` (first ${PDF_MAX_PAGES} will be included)` : ''}`
+        : 'PDF · 1 page';
+    }).catch(err => {
+      if (pdfRenderPromise !== promise) return;
+      console.warn('PDF preview failed', err);
+      const locked = err && err.name === 'PasswordException';
+      msg.textContent = locked
+        ? 'This PDF is password-protected, so it can’t be shown or included. Send the original PDF to accounting with the record.'
+        : 'PDF preview unavailable — the record will be generated without the receipt pages. Send the original PDF to accounting too.';
+      msg.style.color = 'var(--error)';
+    });
+    promise.catch(() => {}); // handled above / in generatePDF
+  }
+
   // ─── PDF Generation ───
   async function generatePDF() {
     normalizeAmountField();
@@ -1830,50 +1908,109 @@
       y += 10;
     });
 
-    // Embed receipt image (compressed for smaller PDF size, EXIF-rotated)
+    // ── Receipt pages to embed (v2.2: PDF receipts are rendered the same way as photos)
+    let receiptPages = [];   // [{ dataUrl, width, height }]
+    let pdfTotalPages = 0;
+    let pdfRenderFailed = false;
+    const isPdfUpload = uploadedFile && uploadedFile.type === 'application/pdf';
+
+    const genBtn = document.getElementById('generateBtn');
+    genBtn.disabled = true;
+    setRightStatus('active', isPdfUpload ? 'Building PDF — rendering receipt pages...' : 'Building PDF...');
+
     if (uploadedFile && uploadedFile.type.startsWith('image/')) {
+      try { receiptPages = [await compressImage(uploadedFile)]; }
+      catch (e) { console.warn('Image embed failed', e); }
+    } else if (isPdfUpload) {
       try {
-        const compressed = await compressImage(uploadedFile);
-        const imgY = y + 6;
-        doc.setTextColor(80, 80, 80);
-        doc.setFontSize(8);
-        doc.setFont('helvetica', 'bold');
-        doc.text('ORIGINAL RECEIPT IMAGE', 10, imgY);
-
-        // Calculate actual available space between label and footer
-        const imageStartY = imgY + 4;
-        const footerStartY = 268; // footer begins at y=270, leave 2mm buffer
-        const maxW = 190;
-        const maxH = footerStartY - imageStartY;
-
-        const ratio = compressed.width / compressed.height;
-        let drawW = maxW;
-        let drawH = drawW / ratio;
-        if (drawH > maxH) {
-          drawH = maxH;
-          drawW = drawH * ratio;
-        }
-        const drawX = 10 + (maxW - drawW) / 2; // center horizontally
-
-        doc.addImage(compressed.dataUrl, 'JPEG', drawX, imageStartY, drawW, drawH, undefined, 'MEDIUM');
-      } catch(e) { console.warn('Image embed failed', e); }
-    } else if (uploadedFile && uploadedFile.type === 'application/pdf') {
-      doc.setTextColor(80,80,80);
-      doc.setFontSize(8);
-      doc.text('Original receipt uploaded as PDF — see source file for full detail.', 10, y + 10);
+        const rendered = await (pdfRenderPromise || renderPdfPages(uploadedFile));
+        receiptPages = rendered.pages;
+        pdfTotalPages = rendered.total;
+      } catch (e) {
+        console.warn('PDF render failed', e);
+        pdfRenderFailed = true;
+      }
     }
 
-    // Footer
-    doc.setFillColor(240, 240, 240);
-    doc.rect(0, 270, 216, 10, 'F');
-    doc.setTextColor(150, 150, 150);
-    doc.setFontSize(7);
-    doc.text('Generated by Receipt Processor · ' + new Date().toISOString(), 10, 276);
+    const FOOTER_TOP = 268;  // footer begins at y=270, leave 2mm buffer
+    const MAX_W = 190;
+
+    function drawFittedImage(img, startY) {
+      const maxH = FOOTER_TOP - startY;
+      const ratio = img.width / img.height;
+      let drawW = MAX_W, drawH = drawW / ratio;
+      if (drawH > maxH) { drawH = maxH; drawW = drawH * ratio; }
+      const drawX = 10 + (MAX_W - drawW) / 2; // center horizontally
+      doc.addImage(img.dataUrl, 'JPEG', drawX, startY, drawW, drawH, undefined, 'MEDIUM');
+    }
+
+    function drawLabel(text, atY) {
+      doc.setTextColor(80, 80, 80);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'bold');
+      doc.text(text, 10, atY);
+    }
+
+    function receiptLabel(i) {
+      if (!isPdfUpload) return 'ORIGINAL RECEIPT IMAGE';
+      return pdfTotalPages > 1 ? `ORIGINAL RECEIPT (PDF PAGE ${i + 1} OF ${pdfTotalPages})` : 'ORIGINAL RECEIPT (PDF)';
+    }
+
+    function drawFooter() {
+      doc.setFillColor(240, 240, 240);
+      doc.rect(0, 270, 216, 10, 'F');
+      doc.setTextColor(150, 150, 150);
+      doc.setFontSize(7);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Generated by Receipt Processor · ' + new Date().toISOString(), 10, 276);
+    }
+
+    // Page 1: first receipt page goes under the details, exactly like a photo receipt
+    if (receiptPages.length > 0) {
+      const imgY = y + 6;
+      drawLabel(receiptLabel(0), imgY);
+      try { drawFittedImage(receiptPages[0], imgY + 4); } catch (e) { console.warn('Embed failed', e); }
+    } else if (pdfRenderFailed) {
+      doc.setTextColor(200, 40, 40);
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Receipt PDF could not be rendered into this record.', 10, y + 10);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Please send the original PDF receipt to accounting together with this file.', 10, y + 16);
+    }
+    drawFooter();
+
+    // Additional PDF pages: one per page, with a slim header
+    for (let i = 1; i < receiptPages.length; i++) {
+      doc.addPage();
+      doc.setFillColor(15, 15, 15);
+      doc.rect(0, 0, 216, 20, 'F');
+      doc.setTextColor(232, 255, 71);
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'bold');
+      doc.text('RECEIPT RECORD', 10, 13);
+      doc.setTextColor(150, 150, 150);
+      doc.setFontSize(8);
+      doc.text(filename, 216 - 10, 13, { align: 'right' });
+      drawLabel(receiptLabel(i), 30);
+      try { drawFittedImage(receiptPages[i], 34); } catch (e) { console.warn('Embed failed', e); }
+      if (i === receiptPages.length - 1 && pdfTotalPages > receiptPages.length) {
+        doc.setTextColor(200, 40, 40);
+        doc.setFontSize(8);
+        doc.text(`Note: only the first ${receiptPages.length} of ${pdfTotalPages} pages are included. Send the original PDF for the rest.`, 10, 266);
+      }
+      drawFooter();
+    }
+
+    genBtn.disabled = false;
+    if (pdfRenderFailed) {
+      showToast('error', '⚠ PDF ready, but the receipt pages could not be included — send the original PDF too.');
+    }
 
     generatedPdfBlob = doc.output('blob');
 
     const sizeKb = (generatedPdfBlob.size / 1024).toFixed(0);
-    showToast('success', `✓ PDF ready (${sizeKb} KB) — use Save buttons below`);
+    if (!pdfRenderFailed) showToast('success', `✓ PDF ready (${sizeKb} KB) — use Save buttons below`);
     setRightStatus('success', `PDF ready · ${filename} · ${sizeKb} KB`);
   }
 
@@ -2048,6 +2185,7 @@
   // ─── Clear ───
   function clearAll() {
     extractionSeq++; // ignore any in-flight extraction
+    pdfRenderPromise = null;
     uploadedFile = null;
     uploadedFileBase64 = null;
     generatedPdfBlob = null;
